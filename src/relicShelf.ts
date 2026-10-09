@@ -12,7 +12,7 @@ const mat = (color: number, extra: Partial<THREE.MeshStandardMaterialParameters>
   new THREE.MeshStandardMaterial({ color, map: grimeTexture(), roughness: 0.7, flatShading: true, ...extra });
 
 /** Objets low-poly provisoires : chaque relique a une silhouette reconnaissable. */
-function buildMesh(id: string): THREE.Object3D {
+export function buildRelicMesh(id: string): THREE.Object3D {
   const g = new THREE.Group();
   const add = (geo: THREE.BufferGeometry, m: THREE.Material, pos: [number, number, number], rot?: [number, number, number]) => {
     const mesh = new THREE.Mesh(geo, m);
@@ -123,7 +123,7 @@ export class RelicShelf {
     this.slots = relics.map((r) => {
       const existing = this.slots.find((s) => s.uid === r.uid);
       if (existing) return existing;
-      const object = buildMesh(r.def.id);
+      const object = buildRelicMesh(r.def.id);
       object.userData.relicUid = r.uid;
       ps1ify(object);
       this.scene.add(object);

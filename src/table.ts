@@ -18,7 +18,6 @@ import {
 import { Cup } from './cup';
 import { Die, orientationFor, randomOrientation } from './dice';
 import { DieLabel } from './labels';
-import type { ComboResult } from './rules/combos';
 import type { Stage } from './scene';
 import { Sfx, type SfxKind } from './sfx';
 
@@ -77,7 +76,8 @@ export class DiceTable {
   private readonly labels: DieLabel[];
   private reveal: { at: number; die: number; step: number }[] = [];
   private revealEnd = -1;
-  private revealResult: ComboResult | null = null;
+  private revealData: { scoring: Set<number>; valueOf: (die: number) => number; hidden: boolean } | null = null;
+  private readonly locked = new Set<Die>();
 
   constructor(
     private readonly stage: Stage,
@@ -116,8 +116,13 @@ export class DiceTable {
     return this.dice.map((d) => d.top().value);
   }
 
+  /** Faces visibles des dés en jeu : index du dé et index logique de la face (0 à 5). */
+  faces(): { die: number; face: number }[] {
+    return this.dice.flatMap((d, i) => (d.active ? [{ die: i, face: d.top().face }] : []));
+  }
+
   hasLooseDice() {
-    return this.dice.some((d) => !d.kept);
+    return this.dice.some((d) => d.active && !d.kept);
   }
 
   // ---------------------------------------------------------------- entrées
@@ -156,7 +161,7 @@ export class DiceTable {
     let next: Die | Cup | null = null;
     if (this.idle) {
       const targets: THREE.Object3D[] = [this.cup.mesh];
-      if (this.canKeep()) targets.push(...this.dice.map((d) => d.mesh));
+      if (this.canKeep()) targets.push(...this.dice.filter((d) => d.active).map((d) => d.mesh));
       const hit = this.raycaster.intersectObjects(targets, true)[0];
       if (hit) {
         next = this.dice.find((d) => d.mesh === hit.object) ?? (this.canGrab() ? this.cup : null);
@@ -184,10 +189,12 @@ export class DiceTable {
   }
 
   private toggleKeep(die: Die) {
+    // Une face clou cloue le dé dans le tapis jusqu'à la fin de la main.
+    if (this.locked.has(die)) return;
     const value = die.top().value;
     if (!die.kept) {
       const used = new Set(this.dice.map((d) => d.slot));
-      const slot = [0, 1, 2, 3, 4].find((s) => !used.has(s))!;
+      const slot = [0, 1, 2, 3, 4, 5].find((s) => !used.has(s))!;
       die.kept = true;
       die.slot = slot;
       die.moveTo(this.slotPosition(slot), orientationFor(value), 0.3);
@@ -205,20 +212,68 @@ export class DiceTable {
     return new THREE.Vector3(KEEP_SLOT.x0 + slot * KEEP_SLOT.dx, KEEP_SLOT.y, KEEP_SLOT.z);
   }
 
-  /** Ramène tous les dés dans le gobelet posé. */
+  /** Ramène tous les dés en jeu dans le gobelet posé. */
   collectDice() {
     this.clearReveal(true);
-    this.dice.forEach((d, i) => {
+    this.locked.clear();
+    this.dice
+      .filter((d) => d.active)
+      .forEach((d, i) => {
+        d.kept = false;
+        d.slot = -1;
+        d.placeDynamic(this.cup.slotWorld(i), randomOrientation());
+      });
+  }
+
+  /** Met le dé `i` dans le tapis et l'y cloue jusqu'à la fin de la main. */
+  forceKeep(i: number) {
+    const die = this.dice[i];
+    if (!die?.active) return;
+    if (!die.kept) this.toggleKeep(die);
+    this.locked.add(die);
+  }
+
+  /** Le créancier retourne le dé `i` sur la face `face` (index logique). */
+  flip(i: number, face: number) {
+    const die = this.dice[i];
+    if (!die?.active) return;
+    const rot = orientationFor(face + 1, Math.floor(Math.random() * 4));
+    if (die.kept) {
+      die.moveTo(this.slotPosition(die.slot), rot, 0.45);
+    } else {
+      const pos = die.position;
+      die.moveTo(pos.clone().setY(1.6), rot, 0.4, () => die.placeDynamic(die.position, rot));
+    }
+    this.sfx.play('wood', 0.7);
+  }
+
+  /**
+   * Boutique : tous les dés possédés s'alignent sur le tapis, leur plus grosse face en haut,
+   * pour qu'on puisse les choisir comme cible d'un burin ou d'un échange.
+   */
+  displayInTray(owned: number[], face: (die: number) => number) {
+    this.clearReveal(true);
+    this.locked.clear();
+    owned.forEach((i, slot) => {
+      const d = this.dice[i];
+      d.setActive(true);
       d.kept = false;
       d.slot = -1;
-      d.placeDynamic(this.cup.slotWorld(i), randomOrientation());
+      d.moveTo(this.slotPosition(slot), orientationFor(face(i) + 1), 0.45);
     });
+  }
+
+  /** Dé sous le pointeur parmi ceux posés sur le tapis (boutique). */
+  pickDie(): number {
+    const shown = this.dice.filter((d) => d.active);
+    const hit = this.raycaster.intersectObjects(shown.map((d) => d.mesh), false)[0];
+    return hit ? this.dice.findIndex((d) => d.mesh === hit.object) : -1;
   }
 
   /** Les dés posés sur la table sursautent (le poing du créancier). */
   hop() {
     for (const d of this.dice) {
-      if (d.kept || d.tween) continue;
+      if (!d.active || d.kept || d.tween) continue;
       d.body.setLinvel({ x: rand(-1.5, 1.5), y: rand(5, 8), z: rand(-1.5, 1.5) }, true);
       d.body.setAngvel(this.randomSpin(rand(4, 9)), true);
     }
@@ -241,7 +296,7 @@ export class DiceTable {
     this.cup.setSolid(true);
     this.cup.setLid(true);
     this.dice
-      .filter((d) => !d.kept)
+      .filter((d) => d.active && !d.kept)
       .forEach((d, i) => d.placeDynamic(this.cup.slotWorld(i), randomOrientation()));
     this.phase = 'holding';
     this.cupMode = 'held';
@@ -338,7 +393,7 @@ export class DiceTable {
 
   private stepRolling(dt: number) {
     this.rollTime += dt;
-    const loose = this.dice.filter((d) => !d.kept);
+    const loose = this.dice.filter((d) => d.active && !d.kept);
     for (const d of loose) {
       this.rescueIfLost(d);
       d.stillTime = d.isResting() ? d.stillTime + dt : 0;
@@ -392,24 +447,36 @@ export class DiceTable {
 
   // ---------------------------------------------------------------- révélation
 
-  /** Les chiffres apparaissent de gauche à droite, puis la combinaison. */
-  startReveal(result: ComboResult) {
-    const order = this.dice.map((_, i) => i).sort((a, b) => this.dice[a].position.x - this.dice[b].position.x);
+  /**
+   * Les chiffres apparaissent de gauche à droite, puis la combinaison.
+   * `hidden` : rien ne s'affiche (faces cachées, yeux perdus) ; chaque valeur a alors
+   * sa propre note, pour qu'on puisse jouer à l'oreille.
+   */
+  startReveal(scoringDice: number[], valueOf: (die: number) => number, hidden: boolean) {
+    const order = this.dice
+      .map((_, i) => i)
+      .filter((i) => this.dice[i].active)
+      .sort((a, b) => this.dice[a].position.x - this.dice[b].position.x);
     this.reveal = order.map((die, step) => ({ at: this.clock + 0.08 + step * REVEAL_STAGGER, die, step }));
     this.revealEnd = this.clock + 0.08 + order.length * REVEAL_STAGGER + 0.12;
-    this.revealResult = result;
+    this.revealData = { scoring: new Set(scoringDice), valueOf, hidden };
   }
 
   private stepReveal() {
-    const res = this.revealResult;
-    if (!res) return;
+    const data = this.revealData;
+    if (!data) return;
     while (this.reveal.length > 0 && this.clock >= this.reveal[0].at) {
       const { die, step } = this.reveal.shift()!;
-      const scoring = res.scoring.includes(die);
-      this.labels[die].show(this.dice[die].top().value, scoring, this.clock);
-      this.dice[die].flash();
-      const freq = REVEAL_BASE_HZ * 2 ** (REVEAL_NOTES[step % REVEAL_NOTES.length] / 12);
-      this.sfx.tone(scoring ? freq * 2 : freq, 0.14, scoring ? 0.3 : 0.14);
+      const scoring = data.scoring.has(die);
+      const value = data.valueOf(die);
+      if (!data.hidden) {
+        this.labels[die].show(value, scoring, this.clock);
+        this.dice[die].flash();
+      }
+      // À l'aveugle, la note dépend de la valeur : on apprend à reconnaître chaque face.
+      const semis = data.hidden ? value * 2 : REVEAL_NOTES[step % REVEAL_NOTES.length];
+      const freq = REVEAL_BASE_HZ * 2 ** (semis / 12);
+      this.sfx.tone(scoring && !data.hidden ? freq * 2 : freq, 0.14, scoring ? 0.3 : 0.18);
     }
     if (this.revealEnd > 0 && this.clock >= this.revealEnd) {
       this.revealEnd = -1;
@@ -423,7 +490,7 @@ export class DiceTable {
   private clearReveal(all: boolean) {
     this.reveal = [];
     this.revealEnd = -1;
-    this.revealResult = null;
+    this.revealData = null;
     this.dice.forEach((d, i) => {
       if (all || !d.kept) this.labels[i].hide();
     });

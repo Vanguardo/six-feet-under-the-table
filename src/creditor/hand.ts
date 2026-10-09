@@ -19,12 +19,26 @@ export const HAND_SCALE = 1.7;
 /** Longueur poignet → bout de l'index, à l'échelle. */
 export const HAND_REACH = (PALM.l + FINGERS[0].lengths.reduce((a, b) => a + b, 0)) * HAND_SCALE;
 
-const skin = new THREE.MeshStandardMaterial({ map: skinTexture(), roughness: 0.75, flatShading: true });
-// Articulations et tendons un peu plus sombres : ils dessinent le relief de la main.
-const knuckleSkin = new THREE.MeshStandardMaterial({ map: skinTexture(), color: 0xb8aaa0, roughness: 0.7, flatShading: true });
-const nail = new THREE.MeshStandardMaterial({ color: 0x8c7a3c, map: grimeTexture(), roughness: 0.4, flatShading: true });
-const sleeve = new THREE.MeshStandardMaterial({ color: 0x0b0808, roughness: 1, flatShading: true });
-const cuff = new THREE.MeshStandardMaterial({ color: 0x4a4038, map: grimeTexture(), roughness: 1, flatShading: true });
+/** Teintes d'une paire de mains : le créancier est pâle, le marchand crasseux. */
+export interface HandLook {
+  skin: number;
+  knuckle: number;
+  nail: number;
+  sleeve: number;
+  cuff: number;
+}
+
+export const CREDITOR_HANDS: HandLook = { skin: 0xffffff, knuckle: 0xb8aaa0, nail: 0x8c7a3c, sleeve: 0x0b0808, cuff: 0x4a4038 };
+export const MERCHANT_HANDS: HandLook = { skin: 0x6a6450, knuckle: 0x7a6a50, nail: 0x1a1410, sleeve: 0x2a1e12, cuff: 0x3a2c1c };
+
+const materialsFor = (look: HandLook) => ({
+  skin: new THREE.MeshStandardMaterial({ map: skinTexture(), color: look.skin, roughness: 0.75, flatShading: true }),
+  // Articulations et tendons un peu plus sombres : ils dessinent le relief de la main.
+  knuckleSkin: new THREE.MeshStandardMaterial({ map: skinTexture(), color: look.knuckle, roughness: 0.7, flatShading: true }),
+  nail: new THREE.MeshStandardMaterial({ color: look.nail, map: grimeTexture(), roughness: 0.4, flatShading: true }),
+  sleeve: new THREE.MeshStandardMaterial({ color: look.sleeve, roughness: 1, flatShading: true }),
+  cuff: new THREE.MeshStandardMaterial({ color: look.cuff, map: grimeTexture(), roughness: 1, flatShading: true }),
+});
 
 /** Paume trapézoïdale : plus large aux jointures qu'au poignet, bombée sur le dessus. */
 function palmGeometry() {
@@ -46,7 +60,11 @@ export class Hand {
   readonly curl = [0.3, 0.3, 0.3, 0.3, 0.3];
   private readonly joints: THREE.Group[][] = [];
 
-  constructor(mirror: boolean) {
+  private readonly m: ReturnType<typeof materialsFor>;
+
+  constructor(mirror: boolean, look: HandLook = CREDITOR_HANDS) {
+    this.m = materialsFor(look);
+    const { skin, knuckleSkin, sleeve, cuff } = this.m;
     const body = new THREE.Group();
     body.scale.set(mirror ? -HAND_SCALE : HAND_SCALE, HAND_SCALE, HAND_SCALE);
     this.root.add(body);
@@ -92,19 +110,19 @@ export class Hand {
       }
       const thick = 0.13 - i * 0.014;
       // Segment légèrement effilé vers le bout.
-      const seg = new THREE.Mesh(new THREE.CylinderGeometry(thick * 0.45, thick * 0.55, len * 0.96, 5).rotateX(Math.PI / 2), skin);
+      const seg = new THREE.Mesh(new THREE.CylinderGeometry(thick * 0.45, thick * 0.55, len * 0.96, 5).rotateX(Math.PI / 2), this.m.skin);
       seg.position.z = len / 2;
       seg.castShadow = true;
       joint.add(seg);
       // Articulation noueuse entre deux phalanges.
       if (i > 0) {
-        const knot = new THREE.Mesh(new THREE.SphereGeometry(thick * 0.62, 5, 4), knuckleSkin);
+        const knot = new THREE.Mesh(new THREE.SphereGeometry(thick * 0.62, 5, 4), this.m.knuckleSkin);
         knot.scale.set(1, 0.85, 0.8);
         joint.add(knot);
       }
       if (i === lengths.length - 1) {
         // Ongle long, jaune, qui dépasse et se recourbe.
-        const n = new THREE.Mesh(new THREE.BoxGeometry(thick * 0.85, 0.025, 0.26), nail);
+        const n = new THREE.Mesh(new THREE.BoxGeometry(thick * 0.85, 0.025, 0.26), this.m.nail);
         n.position.set(0, thick * 0.4, len * 0.85);
         n.rotation.x = 0.25;
         joint.add(n);

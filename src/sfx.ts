@@ -28,6 +28,70 @@ export class Sfx {
   private master: GainNode | null = null;
   private noise: AudioBuffer | null = null;
   private readonly lastPlayed = new Map<SfxKind, number>();
+  private ear: BiquadFilterNode | null = null;
+  private pan: StereoPannerNode | null = null;
+  private tinnitus: OscillatorNode | null = null;
+  private deaf = false;
+
+  /** Oreille perdue : son étouffé, d'un seul côté, avec un sifflement permanent. */
+  setDeaf(on: boolean) {
+    this.deaf = on;
+    const { ctx, ear, pan } = this;
+    if (!ctx || !ear || !pan) return;
+    ear.frequency.setTargetAtTime(on ? 1700 : 20000, ctx.currentTime, 0.3);
+    pan.pan.setTargetAtTime(on ? 0.85 : 0, ctx.currentTime, 0.3);
+    if (on && !this.tinnitus) {
+      this.tinnitus = ctx.createOscillator();
+      this.tinnitus.frequency.value = 6800;
+      const g = ctx.createGain();
+      g.gain.value = 0.004;
+      this.tinnitus.connect(g).connect(ctx.destination);
+      this.tinnitus.start();
+    } else if (!on && this.tinnitus) {
+      this.tinnitus.stop();
+      this.tinnitus = null;
+    }
+  }
+
+  /** Rafale de bruit filtré, éventuellement différée, avec une fréquence qui glisse. */
+  burst(o: { type: BiquadFilterType; freq: number; freqEnd?: number; q?: number; duration: number; volume: number; delay?: number }) {
+    const { ctx, master, noise } = this;
+    if (!ctx || !master || !noise) return;
+    const t = ctx.currentTime + (o.delay ?? 0);
+    const src = ctx.createBufferSource();
+    src.buffer = noise;
+    src.loop = true;
+    const filter = ctx.createBiquadFilter();
+    filter.type = o.type;
+    filter.Q.value = o.q ?? 1;
+    filter.frequency.setValueAtTime(o.freq, t);
+    if (o.freqEnd) filter.frequency.exponentialRampToValueAtTime(o.freqEnd, t + o.duration);
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(0.0001, t);
+    gain.gain.exponentialRampToValueAtTime(o.volume, t + 0.01);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t + o.duration);
+    src.connect(filter).connect(gain).connect(master);
+    src.start(t, Math.random() * 0.2);
+    src.stop(t + o.duration + 0.05);
+  }
+
+  /** Note différée : pour les séquences (battements de cœur, cri étouffé). */
+  toneAt(delay: number, freq: number, freqEnd: number, duration: number, volume: number, type: OscillatorType = 'sine') {
+    const { ctx, master } = this;
+    if (!ctx || !master) return;
+    const t = ctx.currentTime + delay;
+    const osc = ctx.createOscillator();
+    osc.type = type;
+    osc.frequency.setValueAtTime(freq, t);
+    osc.frequency.exponentialRampToValueAtTime(freqEnd, t + duration);
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(0.0001, t);
+    gain.gain.exponentialRampToValueAtTime(volume, t + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t + duration);
+    osc.connect(gain).connect(master);
+    osc.start(t);
+    osc.stop(t + duration + 0.05);
+  }
 
   get context() {
     return this.ctx;
@@ -63,7 +127,13 @@ export class Sfx {
     this.ctx = new AudioContext();
     this.master = this.ctx.createGain();
     this.master.gain.value = 0.6;
-    this.master.connect(this.ctx.destination);
+    // Chaîne de l'oreille : un filtre et un panoramique, neutres tant qu'on a ses deux oreilles.
+    this.ear = this.ctx.createBiquadFilter();
+    this.ear.type = 'lowpass';
+    this.ear.frequency.value = 20000;
+    this.pan = this.ctx.createStereoPanner();
+    this.master.connect(this.ear).connect(this.pan).connect(this.ctx.destination);
+    if (this.deaf) this.setDeaf(true);
     const length = Math.floor(this.ctx.sampleRate * 0.25);
     this.noise = this.ctx.createBuffer(1, length, this.ctx.sampleRate);
     const data = this.noise.getChannelData(0);

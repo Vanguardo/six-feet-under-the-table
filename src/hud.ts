@@ -11,6 +11,14 @@ export interface HudState {
   coins: number;
   combo: ComboResult | null;
   levels: string[];
+  /** Boss en cours : nom et règle. */
+  boss: { name: string; rule: string } | null;
+  /** Ce qui a été perdu (« 2 doigts · 1 œil »). */
+  body: string;
+  /** Secondes restantes avant que l'Horloger ne joue la main. */
+  timer: number | null;
+  /** ×mult de malédiction pour la prochaine main. */
+  curse: number;
   canValidate: boolean;
   hint: string;
 }
@@ -37,7 +45,7 @@ export class Hud {
   }
 
   update(s: HudState) {
-    const key = JSON.stringify({ ...s, hint: '', combo: s.combo && [s.combo.combo.id, s.combo.level, s.combo.score] });
+    const key = JSON.stringify({ ...s, hint: '', timer: s.timer === null ? null : Math.ceil(s.timer), combo: s.combo && [s.combo.combo.id, s.combo.level, s.combo.score] });
     if (key !== this.last) {
       this.last = key;
       const combo = s.combo
@@ -45,8 +53,13 @@ export class Hud {
            <div class="detail">${s.combo.chips} jetons × ${s.combo.mult} (avant reliques)</div>`
         : `<div class="detail">—</div>`;
       const levels = s.levels.length ? `<div class="sep"></div>${s.levels.map((l) => `<div class="detail">${l}</div>`).join('')}` : '';
+      const boss = s.boss ? `<div class="sep"></div><div class="boss">${s.boss.name}</div><div class="detail">${s.boss.rule}</div>` : '';
+      const timer = s.timer !== null ? `<div class="row warn"><span>DÉCIDE</span><span>${Math.ceil(s.timer)} s</span></div>` : '';
+      const curse = s.curse > 1 ? `<div class="row warn"><span>MALÉDICTION</span><span>×${s.curse.toFixed(2)}</span></div>` : '';
+      const body = s.body ? `<div class="sep"></div><div class="detail warn">Perdu : ${s.body}</div>` : '';
       this.ticket.innerHTML = `
         <div class="row"><span>NUIT ${s.night}/7</span><span>${s.isBoss ? 'BOSS' : `ÉCHÉANCE ${s.echeance + 1}/3`}</span></div>
+        ${boss}
         <div class="sep"></div>
         <div class="row"><span>OBJECTIF</span><span>${fmt(s.target)}</span></div>
         <div class="row"><span>SCORE</span><span>${fmt(s.score)}</span></div>
@@ -54,9 +67,11 @@ export class Hud {
         <div class="row"><span>MAINS</span><span>${s.hands}</span></div>
         <div class="row"><span>RELANCES</span><span>${s.rerolls}</span></div>
         <div class="row"><span>PIÈCES</span><span>${s.coins}</span></div>
+        ${timer}${curse}
         <div class="sep"></div>
         ${combo}
         ${levels}
+        ${body}
         <button id="validate" ${s.canValidate ? '' : 'disabled'}>VALIDER [ESPACE]</button>`;
     }
     this.hint.textContent = s.hint;

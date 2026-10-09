@@ -15,6 +15,7 @@ const CrtShader = {
     uTear: { value: 0 },
     uCurvature: { value: 0.06 },
     uDim: { value: 1 },
+    uEyes: { value: 0 },
   },
   vertexShader: /* glsl */ `
     varying vec2 vUv;
@@ -31,6 +32,7 @@ const CrtShader = {
     uniform float uTear;
     uniform float uCurvature;
     uniform float uDim;
+    uniform float uEyes;
     varying vec2 vUv;
 
     float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
@@ -84,6 +86,15 @@ const CrtShader = {
       col *= smoothstep(1.35, 0.35, length(c));
       col *= uDim;
 
+      // Un œil en moins : la moitié gauche du monde disparaît, bord flou et irrégulier.
+      float oneEye = clamp(uEyes, 0.0, 1.0);
+      float edge = 0.42 + sin(uv.y * 9.0 + uTime * 0.7) * 0.02;
+      col *= mix(1.0, smoothstep(edge - 0.12, edge + 0.08, uv.x), oneEye);
+      // Plus d'yeux du tout : seules les lumières fortes percent encore le noir.
+      float blind = clamp(uEyes - 1.0, 0.0, 1.0);
+      float lum = dot(col, vec3(0.3, 0.59, 0.11));
+      col *= mix(1.0, smoothstep(0.32, 0.7, lum) * 0.85 + 0.02, blind);
+
       // Palette 15 bits tramée, comme une console de 1995.
       col = floor(col * 31.0 + 0.5 + bayer4(gl_FragCoord.xy)) / 31.0;
       gl_FragColor = vec4(clamp(col, 0.0, 1.0), 1.0);
@@ -133,6 +144,13 @@ export class PostFx {
     this.tearKick = Math.max(this.tearKick, amount);
   }
 
+  private eyesTarget = 0;
+
+  /** Yeux perdus : 0, 1 ou 2. La transition prend quelques secondes. */
+  setEyes(lost: number) {
+    this.eyesTarget = lost;
+  }
+
   /** Luminosité globale : baisse à la mort. */
   setDim(value: number) {
     this.dimTarget = value;
@@ -147,6 +165,7 @@ export class PostFx {
     u.uAberration.value = 0.0012 + this.pressure * 0.0018 + this.aberrationKick;
     u.uTear.value = this.tearKick;
     u.uDim.value = THREE.MathUtils.lerp(u.uDim.value, this.dimTarget, 0.04);
+    u.uEyes.value = THREE.MathUtils.lerp(u.uEyes.value, this.eyesTarget, 0.02);
     this.composer.render(dt);
   }
 }

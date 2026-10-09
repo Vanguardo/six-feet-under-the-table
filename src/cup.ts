@@ -7,13 +7,15 @@ import { KinematicTween } from './tween';
 const WALL_SEGMENTS = 16;
 const OUTER = CUP_INNER_RADIUS + CUP_WALL;
 
-// Emplacements des dés dans le gobelet (repère local) : 3 au fond, 2 au-dessus.
+// Emplacements des dés dans le gobelet (repère local) : deux couches de trois,
+// la seconde tournée d'un sixième de tour pour s'emboîter (jusqu'à 6 dés).
 const SLOTS = [
   new THREE.Vector3(0.75, CUP_BOTTOM + 0.55, 0),
   new THREE.Vector3(-0.375, CUP_BOTTOM + 0.55, 0.65),
   new THREE.Vector3(-0.375, CUP_BOTTOM + 0.55, -0.65),
-  new THREE.Vector3(0, CUP_BOTTOM + 1.75, 0.55),
-  new THREE.Vector3(0, CUP_BOTTOM + 1.75, -0.55),
+  new THREE.Vector3(-0.75, CUP_BOTTOM + 1.75, 0),
+  new THREE.Vector3(0.375, CUP_BOTTOM + 1.75, 0.65),
+  new THREE.Vector3(0.375, CUP_BOTTOM + 1.75, -0.65),
 ];
 
 /** Gobelet : corps cinématique creux, avec un couvercle invisible quand il est tenu. */
@@ -23,6 +25,18 @@ export class Cup {
   readonly colliders: RAPIER.Collider[] = [];
   private readonly lid: RAPIER.Collider;
   private readonly materials: THREE.MeshStandardMaterial[] = [];
+  /** Contour jaune qui invite à prendre le gobelet. */
+  private outline!: THREE.Mesh;
+  private readonly outlineMaterial = new THREE.MeshBasicMaterial({
+    color: 0xffcc33,
+    side: THREE.BackSide,
+    transparent: true,
+    opacity: 0,
+    depthWrite: false,
+    fog: false,
+  });
+  private prompt = 0;
+  private promptTarget = 0;
   tween: KinematicTween | null = null;
 
   constructor(world: RAPIER.World, scene: THREE.Scene) {
@@ -74,7 +88,15 @@ export class Cup {
       side: THREE.DoubleSide,
       flatShading: true,
     });
-    const body = new THREE.Mesh(new THREE.LatheGeometry(profile, 14), leather);
+    const lathe = new THREE.LatheGeometry(profile, 14);
+    const body = new THREE.Mesh(lathe, leather);
+    // Coque un peu plus grosse, retournée : seul son bord dépasse du cuir.
+    this.outline = new THREE.Mesh(lathe, this.outlineMaterial);
+    this.outline.scale.set(1.07, 1.03, 1.07);
+    this.outline.position.y = -0.05;
+    this.outline.visible = false;
+    this.outline.raycast = () => {};
+    group.add(this.outline);
     body.castShadow = true;
     body.receiveShadow = true;
     group.add(body);
@@ -148,6 +170,17 @@ export class Cup {
       this.tween = null;
       tween.onDone?.();
     }
+  }
+
+  /** Le gobelet attend d'être pris : contour jaune qui pulse. */
+  setPrompt(on: boolean) {
+    this.promptTarget = on ? 1 : 0;
+  }
+
+  updatePrompt(dt: number, clock: number) {
+    this.prompt += (this.promptTarget - this.prompt) * (1 - Math.exp(-dt * 8));
+    this.outline.visible = this.prompt > 0.01;
+    this.outlineMaterial.opacity = this.prompt * (0.55 + 0.45 * Math.sin(clock * 4));
   }
 
   setHighlight(on: boolean) {

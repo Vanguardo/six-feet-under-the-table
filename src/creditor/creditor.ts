@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { repeated, woodTexture } from '../render/textures';
-import { Hand } from './hand';
+import { Hand, HAND_REACH } from './hand';
 import { Smile, SMILE_Y } from './smile';
 
 /** Sons et effets que le créancier déclenche ; fournis par le jeu. */
@@ -41,6 +41,8 @@ const BOARD = { y: 1.7, z: -8.5, w: 5.6, h: 2.0, tilt: -0.35 };
 // Pianotage : la main passe par-dessus le rail et vient pianoter sur le feutre,
 // dans la lumière de l'ampoule, pour que le geste se lise depuis la place du joueur.
 const DRUM = { position: new THREE.Vector3(4.0, 2.08, -8.4), yaw: -0.2, pitch: 0.3 };
+// Profondeur de la feuille du contrat (voir pact.ts).
+export const PAPER_DEPTH = 4.6;
 
 const clonePose = (p: Pose): Pose => ({ ...p, position: p.position.clone(), curl: [...p.curl] });
 const ease = (t: number) => t * t * (3 - 2 * t);
@@ -396,6 +398,30 @@ export class Creditor {
         r.curl = [1, 1, 1, 1, 0.9];
       },
       events: Array.from({ length: times }, (_, i) => ({ at: (per * i + 0.51) / (per * times + 0.3), fn: () => this.fx.slam() })),
+      onEnd: onDone,
+    });
+  }
+
+  /**
+   * Fait glisser une feuille sur la table, du bout des doigts posés sur son bord arrière.
+   * `onMove` reçoit à chaque image la position du centre de la feuille.
+   */
+  slidePaper(from: THREE.Vector3, to: THREE.Vector3, duration: number, onMove: (center: THREE.Vector3) => void, onDone?: () => void) {
+    this.play({
+      duration,
+      stiffness: 20,
+      apply: (t, _l, r) => {
+        const center = from.clone().lerp(to, ease(t));
+        // La feuille glisse sur la planche, passe le rail, puis se pose sur le feutre.
+        center.y = Math.max(0.02, Math.min(PLANK_Y + 0.03, PLANK_Y + 0.03 - (center.z + 7) * 0.9));
+        onMove(center);
+        // Doigts presque tendus, posés sur le bord arrière de la feuille.
+        r.position.set(center.x + 1.4, center.y + 0.32, center.z - PAPER_DEPTH / 2 + 0.7 - HAND_REACH);
+        r.yaw = 0;
+        r.pitch = 0.06;
+        r.curl = [0.12, 0.15, 0.18, 0.2, 0.4];
+      },
+      events: [],
       onEnd: onDone,
     });
   }

@@ -19,7 +19,8 @@ const events = new RAPIER.EventQueue(true);
 
 const stage = createStage(document.getElementById('app')!, world);
 const cup = new Cup(world, stage.scene);
-const dice = Array.from({ length: 5 }, () => new Die(world, stage.scene));
+// Six dés physiques : le sixième ne sert qu'avec la relique Sixième doigt.
+const dice = Array.from({ length: 6 }, () => new Die(world, stage.scene));
 ps1ify(stage.scene);
 setSnapResolution(window.innerWidth, window.innerHeight);
 window.addEventListener('resize', () => setSnapResolution(window.innerWidth, window.innerHeight));
@@ -35,6 +36,8 @@ game = new Game(stage, cup, dice, new Sfx(), hud, {
   aberration: (a) => post.kickAberration(a),
   dim: (v) => post.setDim(v),
   pressure: (p) => post.setPressure(p),
+  eyes: (n) => post.setEyes(n),
+  lean: (p) => rig.leanOver(p),
 });
 
 function stepPhysics() {
@@ -49,16 +52,22 @@ if (import.meta.env.DEV) {
     game,
     post,
     rig,
-    simulate(seconds: number) {
-      for (let i = 0; i < seconds / PHYSICS_DT; i++) stepPhysics();
-      game!.render();
-    },
-    renderOnce() {
-      rig.update(time, 0.016);
-      animateBulb(stage, time);
-      post.render(time, 0.016);
-    },
+    simulate,
+    renderOnce,
   });
+  const { createBot } = await import('./dev/bot');
+  Object.assign(window, { bot: createBot(game, simulate, renderOnce) });
+}
+
+function simulate(seconds: number) {
+  for (let i = 0; i < seconds / PHYSICS_DT; i++) stepPhysics();
+  game!.render();
+}
+
+function renderOnce() {
+  rig.update(time, 0.016);
+  animateBulb(stage, time);
+  post.render(time, 0.016);
 }
 
 let last = performance.now();

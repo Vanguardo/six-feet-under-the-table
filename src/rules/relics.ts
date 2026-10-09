@@ -1,4 +1,6 @@
+import type { Body } from './body';
 import type { ComboId, ComboResult } from './combos';
+import type { Face } from './dice';
 
 export type Rarity = 'commune' | 'peuCommune' | 'rare' | 'maudite';
 
@@ -18,13 +20,16 @@ export interface Effect {
 }
 
 export interface HandContext {
-  values: number[];
+  faces: Face[];
   result: ComboResult;
   /** Première main jouée de l'échéance. */
   isFirstHand: boolean;
   /** Mains restantes après celle-ci. */
   handsLeftAfter: number;
   relicCount: number;
+  body: Body;
+  /** Combinaison de la main précédente dans l'échéance. */
+  previousCombo: ComboId | null;
 }
 
 export type RelicState = Record<string, number>;
@@ -37,7 +42,7 @@ export interface RelicDef {
   description: string;
   initialState?: () => RelicState;
   /** Déclenché pour chaque dé marquant, juste après lui. */
-  onScoringDie?: (value: number, state: RelicState) => Effect | null;
+  onScoringDie?: (face: Face, state: RelicState) => Effect | null;
   /** Déclenché une fois par main, de gauche à droite, après les dés. */
   onHand?: (ctx: HandContext, state: RelicState) => Effect | null;
   /** Après le scoring d'une main (effets qui s'usent). */
@@ -52,13 +57,14 @@ const PAIRS_IN: Partial<Record<ComboId, number>> = { paire: 1, doublePaire: 2, f
 const SUITES: ComboId[] = ['petiteSuite', 'grandeSuite'];
 
 export const RELICS: RelicDef[] = [
+  // ---------------------------------------------------------------- communes
   {
     id: 'dentEnOr',
     name: 'Dent en or',
     rarity: 'commune',
     price: 4,
     description: 'Chaque 1 marquant : +5 mult',
-    onScoringDie: (v) => (v === 1 ? { mult: 5 } : null),
+    onScoringDie: (f) => (f.value === 1 ? { mult: 5 } : null),
   },
   {
     id: 'mainCoupee',
@@ -105,7 +111,7 @@ export const RELICS: RelicDef[] = [
     rarity: 'commune',
     price: 4,
     description: 'Chaque 6 marquant : +10 jetons',
-    onScoringDie: (v) => (v === 6 ? { chips: 10 } : null),
+    onScoringDie: (f) => (f.value === 6 ? { chips: 10 } : null),
   },
   {
     id: 'allumette',
@@ -120,7 +126,7 @@ export const RELICS: RelicDef[] = [
     name: 'Clé rouillée',
     rarity: 'commune',
     price: 5,
-    description: '+1 relique proposée en boutique',
+    description: '+1 article proposé en boutique',
   },
   {
     id: 'craie',
@@ -140,6 +146,7 @@ export const RELICS: RelicDef[] = [
     onHand: (_, s) => (s.mult > 0 ? { mult: s.mult } : null),
     status: (s) => `+${s.mult} mult`,
   },
+  // ---------------------------------------------------------------- peu communes
   {
     id: 'montreArretee',
     name: 'Montre arrêtée',
@@ -165,6 +172,54 @@ export const RELICS: RelicDef[] = [
     onHand: ({ handsLeftAfter }) => (handsLeftAfter > 0 ? { mult: 3 * handsLeftAfter } : null),
   },
   {
+    id: 'bocalVide',
+    name: 'Bocal vide',
+    rarity: 'peuCommune',
+    price: 6,
+    description: '+3 mult par partie du corps perdue',
+    onHand: ({ body }) => (body.lost > 0 ? { mult: 3 * body.lost } : null),
+  },
+  {
+    id: 'moignon',
+    name: 'Moignon',
+    rarity: 'peuCommune',
+    price: 6,
+    description: '+12 jetons par doigt manquant',
+    onHand: ({ body }) => (body.fingers > 0 ? { chips: 12 * body.fingers } : null),
+  },
+  {
+    id: 'oeilDeVerre',
+    name: 'Œil de verre',
+    rarity: 'peuCommune',
+    price: 7,
+    description: '×2 mult s’il ne te reste qu’un œil',
+    onHand: ({ body }) => (body.eyes === 1 ? { xmult: 2 } : null),
+  },
+  {
+    id: 'chienDeFaience',
+    name: 'Chien de faïence',
+    rarity: 'peuCommune',
+    price: 6,
+    description: '×1,5 mult si la combinaison est la même que la main précédente',
+    onHand: ({ result, previousCombo }) => (previousCombo === result.combo.id ? { xmult: 1.5 } : null),
+  },
+  {
+    id: 'couteauABeurre',
+    name: 'Couteau à beurre',
+    rarity: 'peuCommune',
+    price: 5,
+    description: 'Les reliques se revendent à leur prix complet',
+  },
+  {
+    id: 'rosaireDos',
+    name: "Rosaire d'os",
+    rarity: 'peuCommune',
+    price: 7,
+    description: 'Chaque dé en os sans gravure qui marque : ×1,2 mult',
+    onScoringDie: (f) => (f.type === 'os' && !f.mod ? { xmult: 1.2 } : null),
+  },
+  // ---------------------------------------------------------------- rares
+  {
     id: 'leContrat',
     name: 'Le Contrat',
     rarity: 'rare',
@@ -180,9 +235,54 @@ export const RELICS: RelicDef[] = [
     description: 'Un Cinq rapporte ×5 mult',
     onHand: ({ result }) => (result.combo.id === 'cinq' ? { xmult: 5 } : null),
   },
+  {
+    id: 'miroirSansTain',
+    name: 'Miroir sans tain',
+    rarity: 'rare',
+    price: 10,
+    description: 'Copie l’effet de la relique posée à sa droite',
+  },
+  {
+    id: 'sixiemeDoigt',
+    name: 'Sixième doigt',
+    rarity: 'rare',
+    price: 10,
+    description: '+1 dé dans le gobelet ; les cinq meilleurs comptent',
+  },
+  // ---------------------------------------------------------------- maudites (invendables)
+  {
+    id: 'coeurDansUnBocal',
+    name: 'Cœur dans un bocal',
+    rarity: 'maudite',
+    price: 8,
+    description: '×4 mult ; −2 relances par échéance',
+    onHand: () => ({ xmult: 4 }),
+  },
+  {
+    id: 'pacteEnBlanc',
+    name: 'Pacte en blanc',
+    rarity: 'maudite',
+    price: 6,
+    description: 'Chaque pacte rapporte aussi 20 pièces',
+  },
+  {
+    id: 'doigtDuCreancier',
+    name: 'Doigt du créancier',
+    rarity: 'maudite',
+    price: 8,
+    description: '×(1 + 0,5 par pacte signé) mult',
+    onHand: ({ body }) => (body.pacts > 0 ? { xmult: 1 + 0.5 * body.pacts } : null),
+  },
+  {
+    id: 'sourireCousu',
+    name: 'Sourire cousu',
+    rarity: 'maudite',
+    price: 8,
+    description: 'Toutes les combinaisons +1 niveau ; le créancier ne réagit plus',
+  },
 ];
 
-export const RARITY_WEIGHT: Record<Rarity, number> = { commune: 70, peuCommune: 25, rare: 5, maudite: 0 };
+export const RARITY_WEIGHT: Record<Rarity, number> = { commune: 64, peuCommune: 26, rare: 6, maudite: 4 };
 
 export interface OwnedRelic {
   uid: number;
@@ -195,6 +295,10 @@ export function ownRelic(def: RelicDef): OwnedRelic {
   return { uid: nextUid++, def, state: def.initialState?.() ?? {} };
 }
 
-export function sellValue(def: RelicDef) {
-  return Math.floor(def.price / 2);
+export function sellValue(def: RelicDef, fullPrice = false) {
+  return fullPrice ? def.price : Math.floor(def.price / 2);
+}
+
+export function findRelic(id: string) {
+  return RELICS.find((r) => r.id === id)!;
 }

@@ -65,7 +65,8 @@ export interface ComboResult {
 
 /** Plus longue suite de valeurs consécutives ; à longueur égale, la plus haute. */
 function longestRun(values: number[]): number[] {
-  const uniq = [...new Set(values)].sort((a, b) => a - b);
+  // Un 0 (dé maudit, face vide) ne compte jamais dans une suite.
+  const uniq = [...new Set(values.filter((v) => v > 0))].sort((a, b) => a - b);
   let best: number[] = [];
   let run: number[] = [];
   for (const v of uniq) {
@@ -132,4 +133,52 @@ export function evaluate(values: number[], levels: ComboLevels = {}): ComboResul
     mult: base.mult,
     score: chips * base.mult,
   };
+}
+
+export interface BestResult extends ComboResult {
+  /** Valeurs retenues, jokers résolus (même longueur que l'entrée). */
+  values: number[];
+}
+
+const JOKER_VALUES = [1, 2, 3, 4, 5, 6, 7, 8, 10, 12];
+
+/** Toutes les façons de choisir `k` indices parmi `n`. */
+function subsets(n: number, k: number): number[][] {
+  if (k >= n) return [[...Array(n).keys()]];
+  const out: number[][] = [];
+  const pick = (start: number, acc: number[]) => {
+    if (acc.length === k) return out.push([...acc]);
+    for (let i = start; i < n; i++) pick(i + 1, [...acc, i]);
+  };
+  pick(0, []);
+  return out;
+}
+
+/**
+ * Meilleure combinaison possible : avec plus de cinq dés, les cinq meilleurs comptent ;
+ * un joker (face crâne) prend la valeur qui rapporte le plus.
+ */
+export function evaluateBest(values: number[], levels: ComboLevels = {}, jokers: boolean[] = []): BestResult {
+  let best: BestResult | null = null;
+  for (const subset of subsets(values.length, 5)) {
+    const jokerSlots = subset.map((_, k) => k).filter((k) => jokers[subset[k]]);
+    // Au-delà de deux jokers, ils prennent tous la même valeur (assez bon, et rapide).
+    const assignments: number[][] =
+      jokerSlots.length === 0
+        ? [[]]
+        : jokerSlots.length <= 2
+          ? JOKER_VALUES.flatMap((a) => (jokerSlots.length === 1 ? [[a]] : JOKER_VALUES.map((b) => [a, b])))
+          : JOKER_VALUES.map((a) => jokerSlots.map(() => a));
+    for (const assign of assignments) {
+      const sub = subset.map((i) => values[i]);
+      jokerSlots.forEach((k, j) => (sub[k] = assign[j]));
+      const r = evaluate(sub, levels);
+      if (!best || r.score > best.score || (r.score === best.score && r.chips > best.chips)) {
+        const resolved = [...values];
+        subset.forEach((i, k) => (resolved[i] = sub[k]));
+        best = { ...r, scoring: r.scoring.map((k) => subset[k]), values: resolved };
+      }
+    }
+  }
+  return best!;
 }

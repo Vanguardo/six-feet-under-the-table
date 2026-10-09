@@ -35,7 +35,7 @@ export const HOLD_MAX_SPEED = 32;
 export const MIN_SHAKE_TIME = 0.5;
 export const MIN_SHAKE_DISTANCE = 5;
 
-export const KEEP_SLOT = { x0: -9, dx: 1.35, y: 0.5, z: 9.0 };
+export const KEEP_SLOT = { x0: -9.1, dx: 1.2, y: 0.5, z: 9.0 };
 
 // Une face est considérée posée à plat si sa normale est à moins de ~15° de la verticale.
 export const FLAT_ALIGNMENT = 0.966;
