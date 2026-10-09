@@ -1,4 +1,7 @@
+import * as THREE from 'three';
 import RAPIER from '@dimforge/rapier3d-compat';
+import { Ambience } from './ambience';
+import { Creditor } from './creditor/creditor';
 import { Cup } from './cup';
 import { Die } from './dice';
 import { CHIPS_COLOR, COIN_COLOR, FloatTexts, MULT_COLOR, XMULT_COLOR } from './floatText';
@@ -10,6 +13,8 @@ import { RunState, type Earnings } from './rules/run';
 import { scoreHand, type ScoreBreakdown, type ScoreStep } from './rules/scoring';
 import type { Stage } from './scene';
 import type { Sfx } from './sfx';
+import { Particles } from './render/particles';
+import { ps1ify } from './render/ps1';
 import { levelLine, ShopUi } from './shopUi';
 import { DiceTable } from './table';
 
@@ -18,6 +23,18 @@ type Phase = 'play' | 'scoring' | 'payout' | 'shop' | 'over';
 const SCORE_NOTES = [0, 3, 5, 7, 10, 12, 15, 17, 19, 22, 24];
 const SCORE_BASE_HZ = 262;
 const PAYOUT_DURATION = 1.6;
+// Le créancier s'impatiente si le joueur ne fait rien pendant ce délai (secondes).
+const PATIENCE = 5;
+const IMPATIENCE_RAMP = 10;
+
+/** Effets d'image et de caméra que la run déclenche. */
+export interface Fx {
+  jolt(amount: number): void;
+  tear(amount: number): void;
+  aberration(amount: number): void;
+  dim(level: number): void;
+  pressure(level: number): void;
+}
 
 interface Sequence {
   breakdown: ScoreBreakdown;
@@ -35,6 +52,11 @@ export class Game {
   private readonly shelf: RelicShelf;
   private readonly floats: FloatTexts;
   private readonly shopUi: ShopUi;
+  private readonly creditor: Creditor;
+  private readonly ambience: Ambience;
+  private readonly smoke: Particles;
+  private readonly chips: Particles;
+  private lastAction = 0;
 
   private clock = 0;
   private rollsThisHand = 0;
@@ -49,12 +71,17 @@ export class Game {
   private flashUntil = 0;
 
   constructor(
-    stage: Stage,
+    private readonly stage: Stage,
     cup: Cup,
     dice: Die[],
     private readonly sfx: Sfx,
     private readonly hud: Hud,
+    private readonly fx: Fx,
   ) {
+    // Fumée de feutre : grosse, floue, lente, qui monte à peine.
+    this.smoke = new Particles(stage.scene, { max: 320, life: [1.1, 2.0], size: [0.45, 2.4], alpha: 0.14, gravity: 0.3, drag: 2, softness: 1 });
+    // Copeaux de bois : petits, nets, qui retombent.
+    this.chips = new Particles(stage.scene, { max: 360, life: [0.7, 1.4], size: [0.16, 0.1], alpha: 0.95, gravity: -16, drag: 0.8, softness: 0.25 });
     this.table = new DiceTable(stage, cup, dice, sfx, {
       canRoll: () => this.canRoll(),
       canKeep: () => this.phase === 'play' && this.rollsThisHand > 0,
@@ -65,9 +92,19 @@ export class Game {
         this.revealed = true;
         if (this.result) this.hud.popCombo(this.result);
       },
-    });
+    }, { dust: (at, amount) => this.dust(at, amount) });
     this.shelf = new RelicShelf(stage.scene);
     this.floats = new FloatTexts(stage.scene);
+    this.ambience = new Ambience(sfx);
+    this.creditor = new Creditor(stage.scene, {
+      tap: () => this.sfx.play('tap', 0.7),
+      scratch: () => this.sfx.play('scratch', 0.9),
+      clap: () => this.sfx.play('clap', 1),
+      slam: () => this.onSlam(),
+      chips: (at) => this.woodChips(at),
+    });
+    this.creditor.objects.forEach(ps1ify);
+    this.creditor.engrave(fmt(this.run.target));
     this.shopUi = new ShopUi({
       buy: (i) => this.buy(i),
       reroll: () => {
@@ -93,8 +130,14 @@ export class Game {
   // ---------------------------------------------------------------- entrées
 
   private bindInput(canvas: HTMLCanvasElement) {
-    window.addEventListener('keydown', (e) => {
+    const wake = () => {
       this.sfx.unlock();
+      this.ambience.start();
+      this.lastAction = this.clock;
+    };
+    window.addEventListener('pointerdown', wake);
+    window.addEventListener('keydown', (e) => {
+      wake();
       if (e.code === 'Space') {
         e.preventDefault();
         this.validate();
@@ -130,6 +173,7 @@ export class Game {
   }
 
   private onRollStart() {
+    this.lastAction = this.clock;
     this.rollsThisHand++;
     if (this.rollsThisHand > 1) {
       if (this.freeRerollAvailable()) {
@@ -157,6 +201,11 @@ export class Game {
     this.previousResult = result;
     this.result = result;
     this.table.startReveal(result);
+    this.lastAction = this.clock;
+    // Le créancier lit le lancer en même temps que le joueur.
+    if (result.combo.id === 'cinq') this.creditor.clap();
+    else if (result.combo.id === 'deHaut' || result.combo.id === 'paire') this.creditor.sneer(result.combo.id === 'deHaut' ? 1 : 0.7);
+    else this.creditor.wince();
   }
 
   // ---------------------------------------------------------------- scoring
@@ -214,6 +263,9 @@ export class Game {
 
   private finishScoring(breakdown: ScoreBreakdown) {
     this.sequence = null;
+    this.lastAction = this.clock;
+    // Une main qui paie toute l'échéance d'un coup : le poing du créancier se referme.
+    if (breakdown.total >= this.run.target - this.run.score) this.creditor.clench();
     this.hud.hideTally();
     this.run.score += breakdown.total;
     this.run.hands--;
@@ -240,6 +292,7 @@ export class Game {
     this.payoutUntil = this.clock + PAYOUT_DURATION;
     if (this.run.isFinal) {
       this.phase = 'over';
+      this.creditor.vanish();
       this.hud.showBanner('DETTE PAYÉE', 'Le sourire disparaît. R pour une nouvelle run');
       this.sfx.tone(SCORE_BASE_HZ, 1.2, 0.3);
       return;
@@ -253,6 +306,7 @@ export class Game {
     if (this.clock < this.payoutUntil) return;
     this.hud.hideBanner();
     this.phase = 'shop';
+    this.ambience.setShop(true);
     this.run.openShop();
     this.shopUi.show(this.run, this.earnings);
   }
@@ -261,9 +315,62 @@ export class Game {
     this.phase = 'over';
     const { night, echeance, score, target } = this.run;
     const where = `Nuit ${night}, ${echeance === 2 ? 'boss' : `échéance ${echeance + 1}`}`;
-    this.hud.showBanner('LE CRÉANCIER RÉCLAME SON DÛ', `${where} · ${fmt(score)} / ${fmt(target)} · R pour une nouvelle run`);
-    this.sfx.tone(98, 1.4, 0.35, 'sawtooth');
-    this.sfx.tone(92, 1.6, 0.3, 'sawtooth');
+    // Il frappe deux fois. Puis la lumière baisse.
+    this.creditor.knock(2, () => {
+      if (this.phase !== 'over') return;
+      this.stage.lightLevel.value = 0.45;
+      this.fx.dim(0.6);
+      this.hud.showBanner('LE CRÉANCIER RÉCLAME SON DÛ', `${where} · ${fmt(score)} / ${fmt(target)} · R pour une nouvelle run`);
+      this.sfx.tone(98, 1.4, 0.35, 'sawtooth');
+      this.sfx.tone(92, 1.6, 0.3, 'sawtooth');
+    });
+  }
+
+  /** Bouffée de poussière soulevée du feutre. */
+  private dust(at: THREE.Vector3, amount: number) {
+    const n = 1 + Math.round(amount * 4);
+    for (let i = 0; i < n; i++) {
+      const a = Math.random() * Math.PI * 2;
+      const r = 0.6 + Math.random() * 1.2 * (0.5 + amount);
+      const grey = 0.5 + Math.random() * 0.15;
+      this.smoke.emit({
+        position: new THREE.Vector3(at.x + Math.cos(a) * 0.3, 0.12, at.z + Math.sin(a) * 0.3),
+        velocity: new THREE.Vector3(Math.cos(a) * r, 0.25 + Math.random() * 0.5, Math.sin(a) * r),
+        color: new THREE.Color(grey, grey * 0.95, grey * 0.85),
+        scale: 0.6 + amount * 0.8,
+      });
+    }
+  }
+
+  /** Copeaux et sciure qui jaillissent d'un trou creusé dans l'ardoise. */
+  private woodChips(at: THREE.Vector3) {
+    // L'ardoise est penchée vers le joueur : les éclats partent vers l'avant et vers le haut.
+    for (let i = 0; i < 2; i++) {
+      const light = Math.random() < 0.6;
+      this.chips.emit({
+        position: at.clone(),
+        velocity: new THREE.Vector3((Math.random() - 0.5) * 3, 1.5 + Math.random() * 3, 1 + Math.random() * 2.5),
+        color: light ? new THREE.Color(0.72, 0.5, 0.3) : new THREE.Color(0.35, 0.2, 0.1),
+        scale: 0.6 + Math.random() * 0.8,
+      });
+    }
+    if (Math.random() < 0.35) {
+      this.smoke.emit({
+        position: at.clone(),
+        velocity: new THREE.Vector3((Math.random() - 0.5) * 0.6, 0.3, 0.6),
+        color: new THREE.Color(0.45, 0.32, 0.2),
+        scale: 0.35,
+      });
+    }
+  }
+
+  /** Le poing du créancier touche la table : tout tremble, l'image se déchire. */
+  private onSlam() {
+    this.sfx.knock();
+    this.fx.jolt(1);
+    this.fx.tear(0.9);
+    this.fx.aberration(0.008);
+    this.table.hop();
   }
 
   // ---------------------------------------------------------------- boutique
@@ -287,6 +394,9 @@ export class Game {
     this.earnings = null;
     this.run.advance();
     this.phase = 'play';
+    this.lastAction = this.clock;
+    this.ambience.setShop(false);
+    this.creditor.engrave(fmt(this.run.target));
     this.sfx.play('wood', 0.7);
   }
 
@@ -304,6 +414,12 @@ export class Game {
     this.hud.hideBanner();
     this.hud.hideTally();
     this.table.reset();
+    this.creditor.reset();
+    this.creditor.engrave(fmt(this.run.target));
+    this.stage.lightLevel.value = 1;
+    this.fx.dim(1);
+    this.ambience.setShop(false);
+    this.lastAction = this.clock;
   }
 
   // ---------------------------------------------------------------- boucle
@@ -313,6 +429,29 @@ export class Game {
     this.table.step(dt);
     if (this.phase === 'scoring') this.stepScoring();
     if (this.phase === 'payout') this.stepPayout();
+
+    // Impatience : le joueur hésite, les doigts du créancier tapotent de plus en plus vite.
+    const waiting = this.phase === 'play' && this.table.idle && !this.creditor.busy;
+    const idle = this.clock - this.lastAction;
+    this.creditor.setImpatience(waiting ? Math.min(1, Math.max(0, (idle - PATIENCE) / IMPATIENCE_RAMP)) : 0);
+    this.creditor.update(dt, this.clock, this.stage.camera);
+    this.smoke.update(dt);
+    this.chips.update(dt);
+    this.ambience.update(dt);
+    this.fx.pressure(this.pressure());
+  }
+
+  /** Pression de l'échéance : mains consommées sans que la dette ne baisse. */
+  private pressure() {
+    if (this.phase === 'over' || this.phase === 'shop') return 0;
+    const unpaid = 1 - Math.min(1, this.run.score / this.run.target);
+    const spent = 1 - this.run.hands / 4;
+    return unpaid * spent * 1.3;
+  }
+
+  /** L'ampoule vacille : le bourdonnement chute avec elle. */
+  onFlicker(dark: boolean) {
+    this.ambience.flicker(dark);
   }
 
   afterStep(events: RAPIER.EventQueue) {

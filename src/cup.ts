@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import RAPIER from '@dimforge/rapier3d-compat';
 import { CUP_BOTTOM, CUP_HEIGHT, CUP_INNER_RADIUS, CUP_REST, CUP_WALL } from './config';
+import { grimeTexture, leatherTexture, repeated } from './render/textures';
 import { KinematicTween } from './tween';
 
 const WALL_SEGMENTS = 16;
@@ -68,7 +69,7 @@ export class Cup {
       new THREE.Vector2(0, CUP_BOTTOM),
     ];
     const leather = new THREE.MeshStandardMaterial({
-      color: 0x3a1610,
+      map: repeated(leatherTexture(), 3, 1),
       roughness: 0.85,
       side: THREE.DoubleSide,
       flatShading: true,
@@ -78,7 +79,7 @@ export class Cup {
     body.receiveShadow = true;
     group.add(body);
 
-    const brass = new THREE.MeshStandardMaterial({ color: 0x8a6a2a, roughness: 0.4, metalness: 0.8 });
+    const brass = new THREE.MeshStandardMaterial({ color: 0x8a6a2a, map: grimeTexture(), roughness: 0.45, metalness: 0.8 });
     const rim = new THREE.Mesh(new THREE.TorusGeometry(OUTER + 0.05, 0.07, 4, 14), brass);
     rim.rotation.x = Math.PI / 2;
     rim.position.y = CUP_HEIGHT - 0.05;

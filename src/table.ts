@@ -36,6 +36,12 @@ const REVEAL_STAGGER = 0.11;
 const REVEAL_NOTES = [0, 3, 5, 7, 10];
 const REVEAL_BASE_HZ = 392;
 
+/** Effets visuels déclenchés par les dés (fournis par le jeu). */
+export interface TableEffects {
+  /** Poussière soulevée du feutre ; `amount` ≈ 1 pour un impact franc. */
+  dust(at: THREE.Vector3, amount: number): void;
+}
+
 /** Ce que la run autorise ou doit savoir : la table ne connaît pas les règles de score. */
 export interface TableRules {
   canRoll(): boolean;
@@ -64,6 +70,8 @@ export class DiceTable {
   private readonly holdPlane = new THREE.Plane(new THREE.Vector3(0, 0, 1), -HOLD_Z);
   private hovered: Die | Cup | null = null;
   private readonly colliderKinds = new Map<number, ColliderKind>();
+  private readonly dieByCollider = new Map<number, Die>();
+  private dustClock = 0;
   private readonly cupVelocity = new THREE.Vector3();
 
   private readonly labels: DieLabel[];
@@ -77,8 +85,12 @@ export class DiceTable {
     readonly dice: Die[],
     private readonly sfx: Sfx,
     private readonly rules: TableRules,
+    private readonly effects: TableEffects,
   ) {
-    for (const d of dice) this.colliderKinds.set(d.collider.handle, 'die');
+    for (const d of dice) {
+      this.colliderKinds.set(d.collider.handle, 'die');
+      this.dieByCollider.set(d.collider.handle, d);
+    }
     for (const c of cup.colliders) this.colliderKinds.set(c.handle, 'cup');
     for (const h of stage.feltColliders) this.colliderKinds.set(h, 'felt');
     for (const h of stage.woodColliders) this.colliderKinds.set(h, 'wood');
@@ -203,6 +215,15 @@ export class DiceTable {
     });
   }
 
+  /** Les dés posés sur la table sursautent (le poing du créancier). */
+  hop() {
+    for (const d of this.dice) {
+      if (d.kept || d.tween) continue;
+      d.body.setLinvel({ x: rand(-1.5, 1.5), y: rand(5, 8), z: rand(-1.5, 1.5) }, true);
+      d.body.setAngvel(this.randomSpin(rand(4, 9)), true);
+    }
+  }
+
   /** Remet la table à zéro, gobelet compris (nouvelle run). */
   reset() {
     this.phase = 'idle';
@@ -321,6 +342,7 @@ export class DiceTable {
     for (const d of loose) {
       this.rescueIfLost(d);
       d.stillTime = d.isResting() ? d.stillTime + dt : 0;
+      this.trailDust(d, dt);
     }
     if (this.rollTime > 9) {
       for (const d of loose) if (d.stillTime === 0) this.nudge(d);
@@ -336,6 +358,18 @@ export class DiceTable {
     }
     this.phase = 'idle';
     this.rules.onSettled();
+  }
+
+  /** Un dé qui roule sur le feutre laisse une traînée de poussière légère. */
+  private trailDust(d: Die, dt: number) {
+    this.dustClock += dt;
+    if (this.dustClock < 0.012) return;
+    const p = d.position;
+    const v = d.body.linvel();
+    const speed = Math.hypot(v.x, v.z);
+    if (p.y > 0.75 || speed < 2.5 || Math.random() > speed / 40) return;
+    this.dustClock = 0;
+    this.effects.dust(p, 0.25);
   }
 
   private nudge(d: Die) {
@@ -459,7 +493,13 @@ export class DiceTable {
       if (a !== 'die' && b !== 'die') return;
       const other = a === 'die' ? b : a;
       const kind: SfxKind = other === 'die' ? 'click' : other === 'cup' ? 'cup' : other === 'felt' ? 'felt' : 'wood';
-      this.sfx.play(kind, (e.totalForceMagnitude() - FORCE_THRESHOLD) / 2500);
+      const intensity = (e.totalForceMagnitude() - FORCE_THRESHOLD) / 2500;
+      this.sfx.play(kind, intensity);
+      // Un dé qui retombe sur le feutre soulève une bouffée de poussière.
+      if (other === 'felt' && intensity > 0.08) {
+        const die = this.dieByCollider.get(a === 'die' ? e.collider1() : e.collider2());
+        if (die) this.effects.dust(die.position, Math.min(1, intensity));
+      }
     });
   }
 

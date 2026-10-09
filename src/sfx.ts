@@ -1,6 +1,6 @@
 // Sons procéduraux de chocs : du bruit filtré, en attendant de vrais enregistrements.
 
-export type SfxKind = 'click' | 'cup' | 'felt' | 'wood';
+export type SfxKind = 'click' | 'cup' | 'felt' | 'wood' | 'tap' | 'scratch' | 'clap' | 'knock';
 
 interface Preset {
   type: BiquadFilterType;
@@ -15,6 +15,10 @@ const PRESETS: Record<SfxKind, Preset> = {
   cup: { type: 'bandpass', freq: 750, q: 2.5, duration: 0.06, volume: 1.1 },
   felt: { type: 'lowpass', freq: 520, q: 0.8, duration: 0.07, volume: 1.0 },
   wood: { type: 'bandpass', freq: 1600, q: 3, duration: 0.05, volume: 0.9 },
+  tap: { type: 'bandpass', freq: 1100, q: 2, duration: 0.04, volume: 0.5 },
+  scratch: { type: 'bandpass', freq: 2900, q: 7, duration: 0.05, volume: 0.35 },
+  clap: { type: 'bandpass', freq: 1300, q: 1.2, duration: 0.12, volume: 1.0 },
+  knock: { type: 'lowpass', freq: 380, q: 1, duration: 0.35, volume: 1.0 },
 };
 
 const MIN_INTERVAL = 0.012;
@@ -24,6 +28,31 @@ export class Sfx {
   private master: GainNode | null = null;
   private noise: AudioBuffer | null = null;
   private readonly lastPlayed = new Map<SfxKind, number>();
+
+  get context() {
+    return this.ctx;
+  }
+
+  get output() {
+    return this.master;
+  }
+
+  /** Coup de poing sur la table : bruit sourd et une basse qui chute. */
+  knock() {
+    this.play('knock', 1);
+    const { ctx, master } = this;
+    if (!ctx || !master) return;
+    const now = ctx.currentTime;
+    const osc = ctx.createOscillator();
+    osc.frequency.setValueAtTime(90, now);
+    osc.frequency.exponentialRampToValueAtTime(32, now + 0.4);
+    const gain = ctx.createGain();
+    gain.gain.setValueAtTime(0.9, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.5);
+    osc.connect(gain).connect(master);
+    osc.start(now);
+    osc.stop(now + 0.55);
+  }
 
   /** Les navigateurs exigent un geste de l'utilisateur avant de jouer du son. */
   unlock() {

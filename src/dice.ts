@@ -15,6 +15,11 @@ const FACE_NORMALS = [
   new THREE.Vector3(0, 0, -1),
 ];
 const UP = new THREE.Vector3(0, 1, 0);
+const HOVER_SCALE = 1.14;
+const HOVER_LIFT = 0.12;
+const OUTLINE_SCALE = 1.09;
+// Petit dépassement à l'arrivée : le dé « répond » à la souris.
+const easeOutBack = (t: number) => 1 + 2.2 * (t - 1) ** 3 + 1.2 * (t - 1) ** 2;
 
 const PIPS: Record<number, [number, number][]> = {
   1: [[0.5, 0.5]],
@@ -91,16 +96,36 @@ export class Die {
   private readonly materials: THREE.MeshStandardMaterial[];
   private highlighted = false;
   private glow = 0;
+  /** 0 → 1 quand la souris survole le dé : grossit, se soulève, contour jaune. */
+  private hover = 0;
+  private readonly outline: THREE.Mesh;
+  private readonly outlineMaterial: THREE.MeshBasicMaterial;
 
   constructor(world: RAPIER.World, scene: THREE.Scene) {
     textures ??= FACE_VALUES.map(pipTexture);
     this.materials = textures.map(
-      (map) => new THREE.MeshStandardMaterial({ map, roughness: 0.55, metalness: 0 }),
+      (map) => new THREE.MeshStandardMaterial({ map, color: 0xb9b0a0, roughness: 0.7, metalness: 0 }),
     );
     this.mesh = new THREE.Mesh(geometry, this.materials);
     this.mesh.castShadow = true;
     this.mesh.receiveShadow = true;
     scene.add(this.mesh);
+
+    // Contour : une coque un peu plus grande, retournée, dont seul le bord dépasse du dé.
+    this.outlineMaterial = new THREE.MeshBasicMaterial({
+      color: 0xffcc33,
+      side: THREE.BackSide,
+      transparent: true,
+      opacity: 0,
+      depthWrite: false,
+      fog: false,
+    });
+    this.outline = new THREE.Mesh(geometry, this.outlineMaterial);
+    this.outline.scale.setScalar(OUTLINE_SCALE);
+    this.outline.visible = false;
+    // Le contour n'intercepte pas la souris : seul le dé lui-même est survolable.
+    this.outline.raycast = () => {};
+    this.mesh.add(this.outline);
 
     this.body = world.createRigidBody(
       RAPIER.RigidBodyDesc.dynamic()
@@ -184,13 +209,22 @@ export class Die {
   }
 
   tickGlow(dt: number) {
+    // Survol : approche douce vers la cible, un peu plus rapide à l'entrée qu'à la sortie.
+    const target = this.highlighted ? 1 : 0;
+    if (this.hover !== target) {
+      const speed = target > this.hover ? 14 : 9;
+      this.hover += (target - this.hover) * (1 - Math.exp(-dt * speed));
+      if (Math.abs(target - this.hover) < 0.002) this.hover = target;
+      this.outlineMaterial.opacity = this.hover;
+      this.outline.visible = this.hover > 0.01;
+    }
     if (this.glow <= 0) return;
     this.glow = Math.max(0, this.glow - dt * 3.5);
     this.applyGlow();
   }
 
   private applyGlow() {
-    const intensity = Math.max(this.highlighted ? 0.22 : 0, this.glow * 0.8);
+    const intensity = Math.max(this.highlighted ? 0.12 : 0, this.glow * 0.8);
     for (const m of this.materials) {
       m.emissive.setHex(0xff9a30);
       m.emissiveIntensity = intensity;
@@ -200,7 +234,10 @@ export class Die {
   syncMesh() {
     const t = this.body.translation();
     const r = this.body.rotation();
-    this.mesh.position.set(t.x, t.y, t.z);
+    // Le survol ne touche que l'affichage : le corps physique reste où il est.
+    const k = easeOutBack(this.hover);
+    this.mesh.position.set(t.x, t.y + k * HOVER_LIFT, t.z);
     this.mesh.quaternion.set(r.x, r.y, r.z, r.w);
+    this.mesh.scale.setScalar(1 + k * (HOVER_SCALE - 1));
   }
 }

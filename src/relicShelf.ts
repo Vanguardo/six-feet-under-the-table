@@ -1,4 +1,6 @@
 import * as THREE from 'three';
+import { ps1ify } from './render/ps1';
+import { grimeTexture } from './render/textures';
 import type { OwnedRelic } from './rules/relics';
 
 // Les reliques sont posées sur le rebord, entre le tapis de garde et le gobelet.
@@ -7,7 +9,7 @@ const SLOT_DX = 1.3;
 const SLOT_Z = 9.0;
 
 const mat = (color: number, extra: Partial<THREE.MeshStandardMaterialParameters> = {}) =>
-  new THREE.MeshStandardMaterial({ color, roughness: 0.7, flatShading: true, ...extra });
+  new THREE.MeshStandardMaterial({ color, map: grimeTexture(), roughness: 0.7, flatShading: true, ...extra });
 
 /** Objets low-poly provisoires : chaque relique a une silhouette reconnaissable. */
 function buildMesh(id: string): THREE.Object3D {
@@ -123,6 +125,7 @@ export class RelicShelf {
       if (existing) return existing;
       const object = buildMesh(r.def.id);
       object.userData.relicUid = r.uid;
+      ps1ify(object);
       this.scene.add(object);
       return { uid: r.uid, object, pulseAt: -10 };
     });
