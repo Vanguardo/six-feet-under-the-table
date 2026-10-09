@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Six Feet Under the Table</title>
+    <style>
+      html, body {
+        margin: 0;
+        height: 100%;
+        background: #000;
+        overflow: hidden;
+        font-family: "Courier New", Courier, monospace;
+        color: #d8cfb8;
+        user-select: none;
+      }
+      #app canvas {
+        display: block;
+        width: 100vw;
+        height: 100vh;
+        image-rendering: pixelated;
+      }
+      /* HUD temporaire du prototype : sera remplacé par le ticket et les gravures en 3D. */
+      #ticket {
+        position: fixed;
+        top: 16px;
+        left: 16px;
+        min-width: 240px;
+        padding: 12px 14px;
+        background: rgba(232, 224, 200, 0.92);
+        color: #1a1410;
+        font-size: 13px;
+        line-height: 1.5;
+        box-shadow: 0 6px 24px rgba(0, 0, 0, 0.6);
+      }
+      #ticket .row { display: flex; justify-content: space-between; gap: 16px; }
+      #ticket .sep { border-top: 1px dashed #1a1410; margin: 6px 0; }
+      #ticket .combo { font-weight: bold; }
+      #ticket .detail { font-size: 12px; opacity: 0.8; }
+      #validate {
+        margin-top: 8px;
+        width: 100%;
+        padding: 6px;
+        font: inherit;
+        font-weight: bold;
+        background: #1a1410;
+        color: #e8e0c8;
+        border: none;
+        cursor: pointer;
+      }
+      #validate:disabled { opacity: 0.35; cursor: default; }
+      #hint {
+        position: fixed;
+        bottom: 18px;
+        left: 50%;
+        transform: translateX(-50%);
+        font-size: 14px;
+        color: rgba(216, 207, 184, 0.75);
+        text-shadow: 0 0 6px #000;
+        pointer-events: none;
+        text-align: center;
+      }
+      #banner {
+        position: fixed;
+        top: 38%;
+        left: 50%;
+        transform: translate(-50%, -50%);
+        font-size: 34px;
+        letter-spacing: 4px;
+        color: #c8102e;
+        text-shadow: 0 0 18px rgba(200, 16, 46, 0.7);
+        pointer-events: none;
+        opacity: 0;
+        transition: opacity 0.4s;
+        text-align: center;
+      }
+      #banner.show { opacity: 1; }
+      #combo {
+        position: fixed;
+        top: 20%;
+        left: 50%;
+        transform: translate(-50%, -50%) scale(0);
+        font-size: 40px;
+        font-weight: bold;
+        letter-spacing: 3px;
+        text-transform: uppercase;
+        color: #f2c14e;
+        text-shadow: 0 0 14px rgba(242, 193, 78, 0.55), 0 3px 0 #2a0a04;
+        pointer-events: none;
+        text-align: center;
+        opacity: 0;
+      }
+      #combo small { display: block; font-size: 16px; letter-spacing: 1px; color: #e8dcc0; margin-top: 4px; }
+      #combo.pop { animation: combo-pop 2.2s cubic-bezier(0.2, 0.9, 0.3, 1.2) forwards; }
+      @keyframes combo-pop {
+        0% { opacity: 0; transform: translate(-50%, -50%) scale(0.3) rotate(-6deg); }
+        14% { opacity: 1; transform: translate(-50%, -50%) scale(1.18) rotate(2deg); }
+        24% { transform: translate(-50%, -50%) scale(1) rotate(0deg); }
+        80% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+        100% { opacity: 0; transform: translate(-50%, -60%) scale(0.96); }
+      }
+      #banner small { display: block; font-size: 14px; letter-spacing: 1px; color: #d8cfb8; margin-top: 8px; }
+    </style>
+  </head>
+  <body>
+    <div id="app"></div>
+    <div id="ticket"></div>
+    <div id="hint"></div>
+    <div id="banner"></div>
+    <div id="combo"></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
