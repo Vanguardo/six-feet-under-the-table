@@ -42,4 +42,3 @@ export const FLAT_ALIGNMENT = 0.966;
 
 export const HAND_COUNT = 4;
 export const REROLL_COUNT = 6;
-export const TARGET = 300;

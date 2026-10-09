@@ -30,8 +30,32 @@ export const COMBOS: Record<ComboId, Combo> = {
   deHaut: { id: 'deHaut', name: 'Dé haut', chips: 5, mult: 1 },
 };
 
+/** Gain par niveau, appliqué par les Gravures. */
+export const LEVEL_GAIN: Record<ComboId, { chips: number; mult: number }> = {
+  cinq: { chips: 40, mult: 4 },
+  carre: { chips: 30, mult: 3 },
+  grandeSuite: { chips: 30, mult: 3 },
+  full: { chips: 25, mult: 2 },
+  petiteSuite: { chips: 20, mult: 2 },
+  brelan: { chips: 20, mult: 2 },
+  doublePaire: { chips: 20, mult: 1 },
+  paire: { chips: 15, mult: 1 },
+  deHaut: { chips: 10, mult: 1 },
+};
+
+export type ComboLevels = Partial<Record<ComboId, number>>;
+
+export function comboStats(id: ComboId, level = 1) {
+  const gain = LEVEL_GAIN[id];
+  return { chips: COMBOS[id].chips + gain.chips * (level - 1), mult: COMBOS[id].mult + gain.mult * (level - 1) };
+}
+
 export interface ComboResult {
   combo: Combo;
+  level: number;
+  /** Jetons et mult de la combinaison à son niveau, sans les dés. */
+  baseChips: number;
+  baseMult: number;
   /** Indices des dés qui forment la combinaison (les dés « marquants »). */
   scoring: number[];
   chips: number;
@@ -51,7 +75,7 @@ function longestRun(values: number[]): number[] {
   return best;
 }
 
-export function evaluate(values: number[]): ComboResult {
+export function evaluate(values: number[], levels: ComboLevels = {}): ComboResult {
   const byValue = new Map<number, number[]>();
   values.forEach((v, i) => byValue.set(v, [...(byValue.get(v) ?? []), i]));
   const groups = [...byValue.entries()]
@@ -95,6 +119,17 @@ export function evaluate(values: number[]): ComboResult {
   }
 
   const combo = COMBOS[id];
-  const chips = combo.chips + scoring.reduce((sum, i) => sum + values[i], 0);
-  return { combo, scoring, chips, mult: combo.mult, score: chips * combo.mult };
+  const level = levels[id] ?? 1;
+  const base = comboStats(id, level);
+  const chips = base.chips + scoring.reduce((sum, i) => sum + values[i], 0);
+  return {
+    combo,
+    level,
+    baseChips: base.chips,
+    baseMult: base.mult,
+    scoring,
+    chips,
+    mult: base.mult,
+    score: chips * base.mult,
+  };
 }
