@@ -361,6 +361,10 @@
       #ticket .boss { color: #7a0a0a; font-weight: bold; }
       #ticket .warn { color: #7a0a0a; }
       #banner small { display: block; font-size: 14px; letter-spacing: 1px; color: #d8cfb8; margin-top: 8px; }
+      #loading { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; background: #000; color: #8a7a60; font: 14px "Courier New", monospace; letter-spacing: 4px; z-index: 50; }
+      #loading span { animation: blink 1.2s steps(2) infinite; }
+      #loading.error { color: #b03030; letter-spacing: 1px; padding: 24px; text-align: center; }
+      @keyframes blink { 50% { opacity: 0.2; } }
     </style>
   </head>
   <body>
@@ -376,6 +380,7 @@
     <div id="blackout"></div>
     <div id="menu"></div>
     <div id="toast"></div>
+    <div id="loading"><span>LOADING</span></div>
     <script type="module" src="/src/main.ts"></script>
   </body>
 </html>

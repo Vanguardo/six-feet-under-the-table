@@ -205,6 +205,20 @@ export const RELICS: RelicDef[] = [
     onHand: ({ result, previousCombo }) => (previousCombo === result.combo.id ? { xmult: 1.5 } : null),
   },
   {
+    id: 'seringue',
+    name: 'Seringue',
+    rarity: 'peuCommune',
+    price: 6,
+    description: 'Une fois par main, relancer un seul dé ne coûte pas de relance',
+  },
+  {
+    id: 'gobeletFele',
+    name: 'Gobelet fêlé',
+    rarity: 'peuCommune',
+    price: 6,
+    description: 'Un lancer violent ajoute +1 à un dé au hasard',
+  },
+  {
     id: 'couteauABeurre',
     name: 'Couteau à beurre',
     rarity: 'peuCommune',
@@ -227,6 +241,13 @@ export const RELICS: RelicDef[] = [
     price: 9,
     description: '×3 mult ; la dette de chaque nuit suivante augmente de 10 %',
     onHand: () => ({ xmult: 3 }),
+  },
+  {
+    id: 'langueDeSerpent',
+    name: 'Langue de serpent',
+    rarity: 'rare',
+    price: 8,
+    description: 'La valise propose aussi un article maudit, moins cher',
   },
   {
     id: 'cinqCouronnes',

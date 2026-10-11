@@ -43,6 +43,8 @@ export class JarShelf {
   private readonly jars = new Map<JarPart, Jar>();
   private heart: THREE.Object3D | null = null;
   private clock = 0;
+  private readonly lights: { light: THREE.PointLight; base: number }[] = [];
+  private bulbMat: THREE.MeshBasicMaterial | null = null;
 
   constructor(scene: THREE.Scene) {
     // Debout dans la pénombre, à gauche de la table, tourné vers le joueur.
@@ -70,7 +72,8 @@ export class JarShelf {
     add(new THREE.BoxGeometry(SHELF_W, 17, 0.1), [0, -1.8, -0.95]);
 
     // Une petite ampoule nue au-dessus des bocaux, assez pour lire ce qu'il y a dedans.
-    const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.16, 6, 5), new THREE.MeshBasicMaterial({ color: 0xffd08a }));
+    this.bulbMat = new THREE.MeshBasicMaterial({ color: 0xffd08a });
+    const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.16, 6, 5), this.bulbMat);
     bulb.position.set(-0.4, 6.15, 0.4);
     const wire = new THREE.Mesh(new THREE.CylinderGeometry(0.02, 0.02, 0.3, 4), new THREE.MeshBasicMaterial({ color: 0x111111 }));
     wire.position.set(-0.4, 6.4, 0.4);
@@ -82,6 +85,7 @@ export class JarShelf {
     const low = new THREE.PointLight(0xffa860, 9, 5, 1.8);
     low.position.set(0, 2.8, 1.4);
     this.root.add(low);
+    this.lights.push({ light, base: light.intensity }, { light: low, base: low.intensity });
   }
 
   private buildJar(part: JarPart): Jar {
@@ -147,6 +151,12 @@ export class JarShelf {
       const pulse = beat < 0.12 ? beat / 0.12 : beat < 0.3 ? 1 - (beat - 0.12) / 0.18 : 0;
       this.heart.scale.setScalar(1 + pulse * 0.08);
     }
+  }
+
+  /** La petite ampoule suit la grande : quand la cave s'éteint, l'étagère aussi. */
+  setLight(level: number) {
+    for (const { light, base } of this.lights) light.intensity = base * level;
+    this.bulbMat?.color.setRGB(1 * (0.2 + 0.8 * level), 0.82 * (0.2 + 0.8 * level), 0.54 * (0.2 + 0.8 * level));
   }
 
   /** Nouvelle run : les bocaux sont vidés. */

@@ -1,5 +1,6 @@
-import { fmtNum, getLang, t } from './i18n';
+import { fmtNum, t } from './i18n';
 import { comboName } from './i18n/names';
+import type { TicketLine } from './printer';
 import type { ComboResult } from './rules/combos';
 
 export interface HudState {
@@ -31,6 +32,54 @@ export interface HudState {
 
 const fmt = fmtNum;
 
+/** Coupe un texte en lignes de `n` caractères au plus, aux espaces. */
+function wrap(text: string, n: number): string[] {
+  const out: string[] = [];
+  let line = '';
+  for (const word of text.split(/\s+/)) {
+    if ((line + ' ' + word).trim().length > n) {
+      if (line) out.push(line);
+      line = word;
+    } else line = (line + ' ' + word).trim();
+  }
+  if (line) out.push(line);
+  return out;
+}
+
+/** Ce que l'imprimante sort : l'état de l'échéance, puis l'historique des mains jouées. */
+export function ticketLines(s: HudState, log: { name: string; gain: number }[]): TicketLine[] {
+  const L: TicketLine[] = [];
+  L.push({ left: 'SIX FEET UNDER', kind: 'title' });
+  L.push({ left: t('hud.night', { n: s.night }), right: s.isBoss ? t('hud.boss') : t('hud.echeance', { n: s.echeance + 1 }) });
+  if (s.boss) {
+    L.push({ left: s.boss.name.toUpperCase(), kind: 'warn' });
+    for (const w of wrap(s.boss.rule, 34)) L.push({ left: w, kind: 'small' });
+  }
+  L.push({ left: '', kind: 'sep' });
+  L.push({ left: t('hud.target'), right: fmt(s.target), kind: 'big' });
+  L.push({ left: t('hud.score'), right: fmt(s.score), kind: 'big' });
+  L.push({ left: '', kind: 'sep' });
+  L.push({ left: t('hud.hands'), right: String(s.hands) });
+  L.push({ left: t('hud.rerolls'), right: String(s.rerolls) });
+  L.push({ left: t('hud.coins'), right: String(s.coins) });
+  L.push({ left: t('hud.contracts'), right: String(s.contracts), kind: s.contracts === 0 ? 'warn' : undefined });
+  if (s.timer !== null) L.push({ left: t('hud.timer'), right: `${Math.ceil(s.timer)} s`, kind: 'warn' });
+  if (s.curse > 1) L.push({ left: t('hud.curse'), right: `x${s.curse.toFixed(2)}`, kind: 'warn' });
+  if (log.length) {
+    L.push({ left: '', kind: 'sep' });
+    for (const entry of log) L.push({ left: entry.name.toUpperCase(), right: `+${fmt(entry.gain)}` });
+  }
+  if (s.levels.length) {
+    L.push({ left: '', kind: 'sep' });
+    for (const l of s.levels) L.push({ left: l, kind: 'small' });
+  }
+  if (s.body) {
+    L.push({ left: '', kind: 'sep' });
+    for (const w of wrap(t('hud.lost', { what: s.body }), 34)) L.push({ left: w, kind: 'warn' });
+  }
+  return L;
+}
+
 /**
  * HUD temporaire du prototype. Dans le jeu final, ces infos vivront sur la table
  * (ticket imprimé, objectif gravé, pièces empilées) : aucune interface flottante.
@@ -42,7 +91,6 @@ export class Hud {
   private readonly combo = document.getElementById('combo')!;
   private readonly tally = document.getElementById('tally')!;
   private readonly tooltip = document.getElementById('tooltip')!;
-  private last = '';
 
   constructor(private readonly onValidate: () => void) {
     this.ticket.addEventListener('click', (e) => {
@@ -51,37 +99,8 @@ export class Hud {
   }
 
   update(s: HudState) {
-    const key = JSON.stringify({ ...s, lang: getLang(), hint: '', timer: s.timer === null ? null : Math.ceil(s.timer), combo: s.combo && [s.combo.combo.id, s.combo.level, s.combo.score] });
-    if (key !== this.last) {
-      this.last = key;
-      const combo = s.combo
-        ? `<div class="combo">${comboName(s.combo.combo.id)}${s.combo.level > 1 ? ` ${t('hud.level', { n: s.combo.level })}` : ''}</div>
-           <div class="detail">${t('hud.preview', { chips: s.combo.chips, mult: s.combo.mult })}</div>`
-        : `<div class="detail">—</div>`;
-      const levels = s.levels.length ? `<div class="sep"></div>${s.levels.map((l) => `<div class="detail">${l}</div>`).join('')}` : '';
-      const boss = s.boss ? `<div class="sep"></div><div class="boss">${s.boss.name}</div><div class="detail">${s.boss.rule}</div>` : '';
-      const timer = s.timer !== null ? `<div class="row warn"><span>${t('hud.timer')}</span><span>${Math.ceil(s.timer)} s</span></div>` : '';
-      const curse = s.curse > 1 ? `<div class="row warn"><span>${t('hud.curse')}</span><span>×${s.curse.toFixed(2)}</span></div>` : '';
-      const body = s.body ? `<div class="sep"></div><div class="detail warn">${t('hud.lost', { what: s.body })}</div>` : '';
-      this.ticket.innerHTML = `
-        <div class="row"><span>${t('hud.night', { n: s.night })}</span><span>${s.isBoss ? t('hud.boss') : t('hud.echeance', { n: s.echeance + 1 })}</span></div>
-        ${boss}
-        <div class="sep"></div>
-        <div class="row"><span>${t('hud.target')}</span><span>${fmt(s.target)}</span></div>
-        <div class="row"><span>${t('hud.score')}</span><span>${fmt(s.score)}</span></div>
-        <div class="sep"></div>
-        <div class="row"><span>${t('hud.hands')}</span><span>${s.hands}</span></div>
-        <div class="row"><span>${t('hud.rerolls')}</span><span>${s.rerolls}</span></div>
-        <div class="row"><span>${t('hud.coins')}</span><span>${s.coins}</span></div>
-        <div class="row ${s.contracts === 0 ? 'warn' : ''}"><span>${t('hud.contracts')}</span><span>${s.contracts}</span></div>
-        ${timer}${curse}
-        <div class="sep"></div>
-        ${combo}
-        ${levels}
-        ${body}
-        <button id="validate" class="${s.pulse && s.canValidate ? 'pulse' : ''}" ${s.canValidate ? '' : 'disabled'}>${t('hud.validate')}</button>`;
-    }
     this.hint.textContent = s.hint;
+    if (this.ticket.style.display !== 'none') this.ticket.style.display = 'none';
   }
 
   /** La combinaison claque au centre de l'écran une fois les dés révélés. */

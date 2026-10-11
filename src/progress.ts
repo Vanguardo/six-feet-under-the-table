@@ -11,6 +11,8 @@ const KEY = 'sixfeet.save.v1';
 export interface Settings {
   lang: Lang;
   softGore: boolean;
+  /** Accessibilité : un clic sur le gobelet lance les dés. */
+  simpleThrow?: boolean;
   volume: number;
 }
 
@@ -42,6 +44,7 @@ interface SaveData {
 const STARTING_RELICS = [
   'dentEnOr', 'mainCoupee', 'chapelet', 'megot', 'ticketFroisse', 'ampouleNue', 'allumette',
   'cleRouillee', 'craie', 'pieceTrouee', 'montreArretee', 'photoDeFamille', 'sablier', 'chienDeFaience',
+  'seringue', 'gobeletFele',
 ];
 
 /** Conditions de déblocage des reliques et des gobelets (vérifiées après chaque événement). */
@@ -62,6 +65,7 @@ export const UNLOCKS: Unlock[] = [
   { kind: 'relic', id: 'oeilDeVerre', hint: 'unlock.eye', done: (p) => p.stats.taken.oeil >= 1 },
   { kind: 'relic', id: 'couteauABeurre', hint: 'unlock.sell5', done: (p) => p.stats.relicsSold >= 5 },
   { kind: 'relic', id: 'rosaireDos', hint: 'unlock.boneNight', done: (p) => p.flags.has('boneNight') },
+  { kind: 'relic', id: 'langueDeSerpent', hint: 'unlock.tongue', done: (p) => p.stats.taken.langue >= 1 },
   { kind: 'relic', id: 'sixiemeDoigt', hint: 'unlock.hand', done: (p) => p.stats.taken.main >= 1 },
   { kind: 'relic', id: 'coeurDansUnBocal', hint: 'unlock.heart', done: (p) => p.stats.taken.coeur >= 1 },
   { kind: 'relic', id: 'pacteEnBlanc', hint: 'unlock.pacts2run', done: (p) => p.flags.has('twoPacts') },

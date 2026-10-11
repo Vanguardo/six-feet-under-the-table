@@ -124,6 +124,13 @@ export class PostFx {
     window.addEventListener('resize', () => this.resize());
   }
 
+  /** Qualité adaptative : change la résolution interne de toute la chaîne. */
+  setPixelRatio(ratio: number) {
+    this.composer.renderer.setPixelRatio(ratio);
+    this.composer.setPixelRatio(ratio);
+    this.resize();
+  }
+
   private resize() {
     this.composer.setSize(window.innerWidth, window.innerHeight);
     const size = new THREE.Vector2();

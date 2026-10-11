@@ -1,5 +1,5 @@
 import RAPIER from '@dimforge/rapier3d-compat';
-import { GRAVITY, MAX_STEPS_PER_FRAME, PHYSICS_DT } from './config';
+import { GRAVITY, MAX_STEPS_PER_FRAME, PHYSICS_DT, RENDER_SCALE } from './config';
 import { Cup } from './cup';
 import { Die } from './dice';
 import { Game } from './game';
@@ -11,6 +11,16 @@ import { PostFx } from './render/post';
 import { ps1ify, setSnapResolution } from './render/ps1';
 import { animateBulb, createStage, LOOK_AT } from './scene';
 import { Sfx } from './sfx';
+
+// Écran de chargement : remplacé par un message clair si le navigateur ne suit pas (WebGL, WASM).
+const loading = document.getElementById('loading');
+const fail = () => {
+  if (!loading?.isConnected) return;
+  loading.className = 'error';
+  loading.textContent = 'This game needs WebGL 2 and WebAssembly. Try a recent Chrome, Firefox or Edge.';
+};
+window.addEventListener('error', fail);
+window.addEventListener('unhandledrejection', fail);
 
 await RAPIER.init();
 
@@ -43,8 +53,9 @@ game = new Game(stage, cup, dice, new Sfx(), hud, {
   dim: (v, instant) => post.setDim(v, instant),
   pressure: (p) => post.setPressure(p),
   eyes: (n) => post.setEyes(n),
-  lean: (p) => rig.leanOver(p),
-}, progress);
+  lean: (p, from) => rig.leanOver(p, from),
+}, progress, world);
+loading?.remove();
 
 function stepPhysics() {
   game!.step(PHYSICS_DT);
@@ -97,6 +108,26 @@ function frame(now: number) {
   game!.render();
   game!.onFlicker(animateBulb(stage, time));
   post.render(time, dt);
+  adaptQuality(dt);
   requestAnimationFrame(frame);
+}
+
+// Qualité adaptative : si le PC peine (sous ~45 images/s pendant 3 s), on allège
+// d'abord les ombres de l'ampoule, puis la résolution interne. Jamais l'inverse.
+let slowFor = 0;
+let quality = 0;
+function adaptQuality(dt: number) {
+  if (document.hidden || dt >= 0.1 || quality >= 2) return;
+  slowFor = dt > 1 / 45 ? slowFor + dt : Math.max(0, slowFor - dt * 0.5);
+  if (slowFor < 3) return;
+  slowFor = 0;
+  quality++;
+  if (quality === 1) {
+    stage.bulb.shadow.mapSize.set(512, 512);
+    stage.bulb.shadow.map?.dispose();
+    stage.bulb.shadow.map = null;
+  } else {
+    post.setPixelRatio(Math.min(window.devicePixelRatio, 1) * RENDER_SCALE * 0.75);
+  }
 }
 requestAnimationFrame(frame);

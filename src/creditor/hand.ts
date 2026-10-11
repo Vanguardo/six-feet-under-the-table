@@ -30,7 +30,7 @@ export interface HandLook {
 
 export const CREDITOR_HANDS: HandLook = { skin: 0xffffff, knuckle: 0xb8aaa0, nail: 0x8c7a3c, sleeve: 0x0b0808, cuff: 0x4a4038 };
 export const MERCHANT_HANDS: HandLook = { skin: 0x6a6450, knuckle: 0x7a6a50, nail: 0x1a1410, sleeve: 0x2a1e12, cuff: 0x3a2c1c };
-export const PLAYER_HANDS: HandLook = { skin: 0xe8cdb8, knuckle: 0xc8a090, nail: 0xd8c8b0, sleeve: 0x000000, cuff: 0x000000 };
+export const PLAYER_HANDS: HandLook = { skin: 0xe8cdb8, knuckle: 0xc8a090, nail: 0xd8c8b0, sleeve: 0x2a2620, cuff: 0x4a4236 };
 
 const materialsFor = (look: HandLook) => ({
   skin: new THREE.MeshStandardMaterial({ map: skinTexture(), color: look.skin, roughness: 0.75, flatShading: true }),
@@ -60,11 +60,19 @@ export class Hand {
   /** Courbure de chaque doigt (-0.6 = relevé, 0 = tendu, 1 = poing) : index, majeur, annulaire, auriculaire, pouce. */
   readonly curl = [0.3, 0.3, 0.3, 0.3, 0.3];
   private readonly joints: THREE.Group[][] = [];
+  /** Moignons bandés, un par doigt (index, majeur, annulaire, auriculaire), cachés tant que le doigt est là. */
+  private readonly stumps: THREE.Object3D[] = [];
+  /** Main humaine (le joueur) : trois phalanges, ongles courts. */
+  private readonly human: boolean;
 
   private readonly m: ReturnType<typeof materialsFor>;
 
-  /** `bare` : main coupée, sans manche ni manchette, le poignet tranché à vif. */
-  constructor(mirror: boolean, look: HandLook = CREDITOR_HANDS, bare = false) {
+  /**
+   * `bare` : main coupée, sans manche ni manchette, le poignet tranché à vif.
+   * `human` : main ordinaire (le joueur), sans la phalange de trop du créancier.
+   */
+  constructor(mirror: boolean, look: HandLook = CREDITOR_HANDS, bare = false, human = false) {
+    this.human = human;
     this.m = materialsFor(look);
     const { skin, knuckleSkin, sleeve, cuff } = this.m;
     const body = new THREE.Group();
@@ -96,10 +104,22 @@ export class Hand {
       add(new THREE.BoxGeometry(0.72, 0.48, 5), sleeve, [0, 0.05, -3.0]);
     }
 
+    const bandage = new THREE.MeshStandardMaterial({ color: 0xd8d0bc, map: grimeTexture(), roughness: 1, flatShading: true });
+    const blood = new THREE.MeshStandardMaterial({ color: 0x6a0808, roughness: 0.35 });
     for (const f of FINGERS) {
       // Jointure saillante à la base de chaque doigt.
       add(new THREE.BoxGeometry(0.17, 0.1, 0.15), knuckleSkin, [f.x, PALM.h / 2 + 0.01, PALM.l - 0.05]);
-      this.joints.push(this.buildFinger(body, new THREE.Vector3(f.x, 0, PALM.l), 0, f.lengths));
+      // Trois phalanges pour un humain : les deux dernières du créancier n'en font qu'une.
+      const lengths = human ? [f.lengths[0] * 1.1, f.lengths[1] * 1.05, f.lengths[2] * 0.9] : f.lengths;
+      this.joints.push(this.buildFinger(body, new THREE.Vector3(f.x, 0, PALM.l), 0, lengths));
+      // Moignon : un bout de phalange enroulé dans un pansement taché.
+      const stump = new THREE.Group();
+      stump.position.set(f.x, 0, PALM.l);
+      add(new THREE.CylinderGeometry(0.075, 0.08, 0.16, 6).rotateX(Math.PI / 2), bandage, [0, 0, 0.07], stump);
+      add(new THREE.SphereGeometry(0.05, 5, 4), blood, [0, 0.02, 0.15], stump);
+      stump.visible = false;
+      body.add(stump);
+      this.stumps.push(stump);
     }
     this.joints.push(this.buildFinger(body, new THREE.Vector3(THUMB.x, -0.02, THUMB.z), THUMB.yaw, THUMB.lengths));
   }
@@ -129,9 +149,9 @@ export class Hand {
       }
       if (i === lengths.length - 1) {
         // Ongle long, jaune, qui dépasse et se recourbe.
-        const n = new THREE.Mesh(new THREE.BoxGeometry(thick * 0.85, 0.025, 0.26), this.m.nail);
-        n.position.set(0, thick * 0.4, len * 0.85);
-        n.rotation.x = 0.25;
+        const n = new THREE.Mesh(new THREE.BoxGeometry(thick * 0.85, 0.025, this.human ? 0.1 : 0.26), this.m.nail);
+        n.position.set(0, thick * 0.4, this.human ? len * 0.62 : len * 0.85);
+        n.rotation.x = this.human ? 0 : 0.25;
         joint.add(n);
       }
       attach.add(joint);
@@ -139,6 +159,15 @@ export class Hand {
       joints.push(joint);
     });
     return joints;
+  }
+
+  /** Doigts coupés (0 = index … 3 = auriculaire) : le doigt disparaît, un moignon bandé reste. */
+  setMissing(fingers: number[]) {
+    for (let f = 0; f < 4; f++) {
+      const gone = fingers.includes(f);
+      this.joints[f][0].visible = !gone;
+      this.stumps[f].visible = gone;
+    }
   }
 
   /** Applique les courbures courantes aux articulations. */

@@ -25,13 +25,14 @@ export class CameraRig {
   }
 
   /** Se pencher au-dessus d'un point de la table (lire le contrat), ou se rasseoir (`null`). */
-  leanOver(point: THREE.Vector3 | null) {
+  leanOver(point: THREE.Vector3 | null, from?: THREE.Vector3) {
     if (!point) {
       this.leanTarget = 0;
       return;
     }
     this.leanLook.copy(point);
-    this.leanPosition.set(point.x, point.y + 7, point.z + 5);
+    if (from) this.leanPosition.copy(from);
+    else this.leanPosition.set(point.x, point.y + 7, point.z + 5);
     this.leanTarget = 1;
   }
 

@@ -32,7 +32,6 @@ const Z_AXIS = new THREE.Vector3(0, 0, 1);
 const FORCE_THRESHOLD = 120;
 const REVEAL_STAGGER = 0.11;
 // Gamme mineure pentatonique : la révélation monte, sans jamais sonner joyeuse.
-const REVEAL_NOTES = [0, 3, 5, 7, 10];
 const REVEAL_BASE_HZ = 392;
 
 /** Effets visuels déclenchés par les dés (fournis par le jeu). */
@@ -78,6 +77,13 @@ export class DiceTable {
   private revealEnd = -1;
   private revealData: { scoring: Set<number>; valueOf: (die: number) => number; hidden: boolean } | null = null;
   private readonly locked = new Set<Die>();
+  /** Accessibilité : un clic sur le gobelet suffit, la secousse est jouée toute seule. */
+  simpleThrow = false;
+  /** Main gauche perdue : le gobelet tremble dans une seule main. */
+  tremble = 0;
+  private autoShake = -1;
+  /** Vitesse du gobelet au lâcher du dernier lancer (Gobelet fêlé). */
+  lastThrowSpeed = 0;
 
   constructor(
     private readonly stage: Stage,
@@ -139,12 +145,13 @@ export class DiceTable {
       if (this.hovered === this.cup && this.canGrab()) {
         canvas.setPointerCapture(e.pointerId);
         this.startHolding();
+        if (this.simpleThrow) this.autoShake = 0;
       } else if (this.hovered instanceof Die && this.canKeep()) {
         this.toggleKeep(this.hovered);
       }
     });
     canvas.addEventListener('pointerup', () => {
-      if (this.phase === 'holding') this.release();
+      if (this.phase === 'holding' && this.autoShake < 0) this.release();
     });
   }
 
@@ -331,8 +338,32 @@ export class DiceTable {
   }
 
   private stepHeld(dt: number) {
+    if (this.autoShake >= 0) {
+      // Lancer simple : une secousse franche, puis un geste vers l'avant et on lâche.
+      this.autoShake += dt;
+      const cx = (HOLD_MIN.x + HOLD_MAX.x) / 2 + 2;
+      const cy = (HOLD_MIN.y + HOLD_MAX.y) / 2;
+      const s = this.autoShake;
+      if (s < 0.85) this.holdTarget.set(cx + Math.sin(s * 26) * 3, cy + Math.cos(s * 19) * 1.4, HOLD_Z);
+      else this.holdTarget.set(cx - 1.5, HOLD_MAX.y, HOLD_Z);
+      if (s >= 1.0) {
+        this.autoShake = -1;
+        this.stepHeldMotion(dt);
+        this.release();
+        return;
+      }
+    }
+    this.stepHeldMotion(dt);
+  }
+
+  private stepHeldMotion(dt: number) {
     const pos = this.cup.position;
-    const vel = this.holdTarget.clone().sub(pos).multiplyScalar(HOLD_FOLLOW);
+    const target = this.holdTarget.clone();
+    if (this.tremble > 0) {
+      target.x += (Math.sin(this.clock * 43) + Math.sin(this.clock * 71)) * 0.18 * this.tremble;
+      target.y += Math.sin(this.clock * 57) * 0.22 * this.tremble;
+    }
+    const vel = target.sub(pos).multiplyScalar(HOLD_FOLLOW);
     if (vel.length() > HOLD_MAX_SPEED) vel.setLength(HOLD_MAX_SPEED);
     const next = pos.addScaledVector(vel, dt);
 
@@ -372,6 +403,7 @@ export class DiceTable {
     }
 
     const v = this.releaseVelocity();
+    this.lastThrowSpeed = Math.hypot(v.x, v.y);
     this.cup.setSolid(false);
     this.throwDice(v);
     this.rules.onRollStart();
@@ -492,15 +524,15 @@ export class DiceTable {
     const data = this.revealData;
     if (!data) return;
     while (this.reveal.length > 0 && this.clock >= this.reveal[0].at) {
-      const { die, step } = this.reveal.shift()!;
+      const { die } = this.reveal.shift()!;
       const scoring = data.scoring.has(die);
       const value = data.valueOf(die);
       if (!data.hidden) {
         this.labels[die].show(value, scoring, this.clock);
         this.dice[die].flash();
       }
-      // À l'aveugle, la note dépend de la valeur : on apprend à reconnaître chaque face.
-      const semis = data.hidden ? value * 2 : REVEAL_NOTES[step % REVEAL_NOTES.length];
+      // La note dépend de la valeur, toujours : on apprend chaque face avant de perdre ses yeux.
+      const semis = value * 2;
       const freq = REVEAL_BASE_HZ * 2 ** (semis / 12);
       this.sfx.tone(scoring && !data.hidden ? freq * 2 : freq, 0.14, scoring ? 0.3 : 0.18);
     }

@@ -12,6 +12,8 @@ export interface CreditorFx {
   slam(): void;
   /** Copeaux et sciure qui jaillissent d'un trou fraîchement creusé (position monde). */
   chips(at: THREE.Vector3): void;
+  /** Papier qu'on déchire. */
+  tear(): void;
 }
 
 interface Pose {
@@ -272,7 +274,7 @@ export class Creditor {
 
   private readonly board = new THREE.Group();
 
-  constructor(scene: THREE.Scene, private readonly fx: CreditorFx) {
+  constructor(private readonly scene: THREE.Scene, private readonly fx: CreditorFx) {
     // La face avant (+Z, 5e groupe de la boîte) porte la gravure ; les autres faces sont du bois brut.
     const raw = new THREE.MeshStandardMaterial({ map: repeated(woodTexture(true), 1.5, 0.6), roughness: 0.9, flatShading: true });
     const slab = new THREE.Mesh(new THREE.BoxGeometry(BOARD.w, BOARD.h, 0.15), [raw, raw, raw, raw, this.engraving.material, raw]);
@@ -491,6 +493,135 @@ export class Creditor {
     });
   }
 
+  /**
+   * Vente d'une relique : sa main traverse la table, ramasse l'objet et le fait disparaître
+   * dans sa manche. `object` est une copie posée à la place de la relique vendue.
+   */
+  snatch(object: THREE.Object3D, onDone?: () => void) {
+    const from = object.position.clone();
+    // Le bras arrive en biais depuis la droite, pour contourner la valise ouverte.
+    const yaw = -0.75;
+    const dir = new THREE.Vector3(Math.sin(yaw), 0, Math.cos(yaw));
+    const reach = from.clone().addScaledVector(dir, -HAND_REACH * 0.62).add(new THREE.Vector3(0, 2.0, 0));
+    const home = new THREE.Vector3(REST_RIGHT.position.x, PLANK_Y + 1.2, -15);
+    let carried = false;
+    this.leftovers.push(object);
+    this.play({
+      duration: 2.3,
+      stiffness: 11,
+      apply: (t, _l, r) => {
+        const go = ease(Math.min(1, t / 0.4));
+        const back = ease(THREE.MathUtils.clamp((t - 0.5) / 0.5, 0, 1));
+        r.position.copy(REST_RIGHT.position).lerp(reach, go).lerp(home, back);
+        r.yaw = yaw * go * (1 - back);
+        r.pitch = 0.9 * (1 - back * 0.6);
+        // Les doigts s'ouvrent au-dessus, puis se referment d'un coup sur l'objet.
+        const grab = t > 0.42 ? 1 : 0;
+        r.curl = [0, 0, 0, 0, 0.1].map((open, i) => THREE.MathUtils.lerp(open, [0.85, 0.9, 0.92, 0.95, 0.7][i], grab));
+        if (t > 0.45) {
+          carried = true;
+          object.position.copy(r.position).addScaledVector(dir, HAND_REACH * 0.5 * (1 - back)).add(new THREE.Vector3(0, -1.4 + back * 0.6, HAND_REACH * 0.5 * back));
+          object.rotation.y += 0.04;
+          object.scale.setScalar(Math.max(0.01, 1 - back * 0.9));
+        }
+      },
+      events: [],
+      onEnd: () => {
+        if (carried) this.scene.remove(object);
+        onDone?.();
+      },
+    });
+  }
+
+  /**
+   * Victoire finale : les deux mains montent le contrat dans la lumière et le déchirent en deux.
+   * Les moitiés tombent sur la table, puis les mains reculent dans le noir.
+   */
+  tearContract(onDone?: () => void) {
+    const tex = contractTexture();
+    const halfW = 1.2;
+    const h = 1.7;
+    const halves = [0, 1].map((side) => {
+      const tx = tex.clone();
+      tx.needsUpdate = true;
+      tx.repeat.set(0.5, 1);
+      tx.offset.set(side * 0.5, 0);
+      const m = new THREE.Mesh(new THREE.PlaneGeometry(halfW, h), new THREE.MeshStandardMaterial({ map: tx, emissiveMap: tx, emissive: 0x2e2618, roughness: 0.9, side: THREE.DoubleSide }));
+      m.castShadow = true;
+      this.scene.add(m);
+      this.leftovers.push(m);
+      return m;
+    });
+    const fall = halves.map(() => ({ y: 0, rot: 0 }));
+    const z = -9.4 + HAND_REACH * 0.55;
+    this.smile.widen(1, this.clock, 4);
+    this.play({
+      duration: 3.4,
+      stiffness: 12,
+      apply: (t, l, r) => {
+        const up = ease(Math.min(1, t / 0.22));
+        const rip = ease(THREE.MathUtils.clamp((t - 0.38) / 0.16, 0, 1));
+        const gap = 1.2 + rip * 1.4;
+        const open = t > 0.62;
+        r.position.lerp(new THREE.Vector3(gap, 3.4 + rip * 0.3, -9.4), up);
+        l.position.lerp(new THREE.Vector3(-gap, 3.4 + rip * 0.3, -9.4), up);
+        r.roll = 1.35 * up;
+        l.roll = -1.35 * up;
+        r.yaw = THREE.MathUtils.lerp(r.yaw, 0, up);
+        l.yaw = THREE.MathUtils.lerp(l.yaw, 0, up);
+        r.pitch = l.pitch = -0.15 * up;
+        const pinch = open ? 0 : 0.75;
+        r.curl = r.curl.map((c) => THREE.MathUtils.lerp(c, pinch, up));
+        l.curl = l.curl.map((c) => THREE.MathUtils.lerp(c, pinch, up));
+        halves.forEach((m, side) => {
+          const dir = side === 0 ? -1 : 1;
+          const f = fall[side];
+          if (!open) {
+            // Chaque moitié est pincée par une main ; la déchirure les écarte en biais.
+            m.position.set(dir * (gap - halfW / 2 - 0.05), 3.4 + 1.3 + rip * 0.3, z);
+            m.rotation.set(0, 0, -dir * rip * 0.35);
+            f.y = m.position.y;
+          } else {
+            // Les doigts s'ouvrent : les moitiés tombent en tournoyant et se couchent sur la table.
+            const ft = (t - 0.62) * 3.4;
+            m.position.y = Math.max(0.02, f.y - 2.6 * ft * ft);
+            f.rot = Math.min(1, ft / 1.3);
+            m.rotation.set(-Math.PI / 2 * f.rot, 0, -dir * (0.35 + f.rot * 0.8));
+          }
+        });
+      },
+      events: [{ at: 0.4, fn: () => this.fx.tear() }],
+      onEnd: onDone,
+    });
+  }
+
+  /**
+   * La paie : la main droite se referme sur une poignée de pièces, recule, puis la lance
+   * vers le joueur en s'ouvrant. `onRelease` est appelé quand les doigts lâchent.
+   */
+  toss(onRelease: () => void) {
+    const windup = new THREE.Vector3(2.6, PLANK_Y + 3.0, -11.2);
+    const fling = new THREE.Vector3(1.8, PLANK_Y + 1.6, -7.6);
+    this.play({
+      duration: 1.5,
+      stiffness: 16,
+      apply: (t, _l, r) => {
+        const up = ease(Math.min(1, t / 0.35));
+        const go = ease(THREE.MathUtils.clamp((t - 0.38) / 0.14, 0, 1));
+        const back = ease(THREE.MathUtils.clamp((t - 0.7) / 0.3, 0, 1));
+        r.position.copy(REST_RIGHT.position).lerp(windup, up).lerp(fling, go).lerp(REST_RIGHT.position, back);
+        r.yaw = 0;
+        r.pitch = THREE.MathUtils.lerp(-0.5 * up, 0.35, go) * (1 - back);
+        const open = t > 0.5 ? 1 : 0;
+        r.curl = r.curl.map((_, i) => THREE.MathUtils.lerp(i === 4 ? 0.8 : 1, -0.3, open));
+      },
+      events: [{ at: 0.5, fn: onRelease }],
+    });
+  }
+
+  /** Moitiés de contrat restées sur la table après la victoire. */
+  private readonly leftovers: THREE.Object3D[] = [];
+
   /** Le sourire n'apparaît qu'à la première échéance payée du tutoriel. */
   showSmile(on: boolean) {
     this.smile.setVisible(on);
@@ -504,6 +635,8 @@ export class Creditor {
   }
 
   reset() {
+    for (const o of this.leftovers) this.scene.remove(o);
+    this.leftovers.length = 0;
     this.action = null;
     this.retreat = this.retreatTarget = 0;
     this.smile.setVisible(true);
@@ -613,4 +746,39 @@ export class Creditor {
     for (let f = 0; f < 5; f++) hand.curl[f] = THREE.MathUtils.clamp(current.curl[f], -0.6, 1);
     hand.pose();
   }
+}
+
+/** Le contrat de la dette : papier jauni, lignes serrées, une empreinte de pouce en sang. */
+function contractTexture() {
+  const c = document.createElement('canvas');
+  c.width = 128;
+  c.height = 96;
+  const g = c.getContext('2d')!;
+  g.fillStyle = '#c8b890';
+  g.fillRect(0, 0, 128, 96);
+  for (let i = 0; i < 120; i++) {
+    g.fillStyle = `rgba(90, 60, 30, ${Math.random() * 0.2})`;
+    g.fillRect(Math.random() * 128, Math.random() * 96, 2, 2);
+  }
+  g.fillStyle = '#2a1a10';
+  g.font = 'bold 10px "Courier New", monospace';
+  g.fillText('66 600', 44, 16);
+  g.strokeStyle = 'rgba(40, 25, 15, 0.7)';
+  for (let y = 26; y < 76; y += 6) {
+    g.beginPath();
+    g.moveTo(12, y);
+    for (let x = 12; x < 116; x += 4) g.lineTo(x, y + Math.random() * 1.5);
+    g.stroke();
+  }
+  // Toutes les empreintes signées pendant la run.
+  for (let i = 0; i < 4; i++) {
+    g.fillStyle = 'rgba(110, 8, 8, 0.75)';
+    g.beginPath();
+    g.ellipse(24 + i * 26, 85, 6, 8, 0.2, 0, Math.PI * 2);
+    g.fill();
+  }
+  const tex = new THREE.CanvasTexture(c);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.magFilter = THREE.NearestFilter;
+  return tex;
 }

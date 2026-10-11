@@ -451,6 +451,13 @@ export class PactScene {
     this.at(cut + 2.8, onDone);
   }
 
+  /** Abrège la mise en scène : tout ce qui restait à jouer arrive d'un coup. */
+  skip() {
+    const rest = this.timeline;
+    this.timeline = [];
+    for (const e of rest) e.fn();
+  }
+
   private at(delay: number, fn: () => void) {
     this.timeline.push({ at: this.clock + delay, fn });
     this.timeline.sort((a, b) => a.at - b.at);

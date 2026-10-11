@@ -26,6 +26,8 @@ export function buildRelicMesh(id: string): THREE.Object3D {
   const bone = mat(0xd6ccae);
   const paper = mat(0xcfc2a0);
   const red = mat(0x7a0d12);
+  const skin = mat(0xc8a890);
+  const china = mat(0xe8e8e0, { roughness: 0.25, flatShading: false });
   switch (id) {
     case 'dentEnOr':
       add(new THREE.ConeGeometry(0.22, 0.6, 5), gold, [0, 0.3, 0], [Math.PI, 0, 0]);
@@ -99,6 +101,84 @@ export function buildRelicMesh(id: string): THREE.Object3D {
       }
       add(new THREE.CylinderGeometry(0.32, 0.32, 0.14, 10, 1, true), gold, [0, 0.07, 0]);
       break;
+    case 'bocalVide':
+      add(new THREE.CylinderGeometry(0.24, 0.24, 0.5, 8, 1, true), mat(0xc8d8c0, { transparent: true, opacity: 0.35, side: THREE.DoubleSide }), [0, 0.25, 0]);
+      add(new THREE.CylinderGeometry(0.26, 0.26, 0.08, 8), mat(0x4a4030, { metalness: 0.6 }), [0, 0.52, 0]);
+      add(new THREE.CylinderGeometry(0.22, 0.22, 0.12, 8), mat(0x6a7a30, { transparent: true, opacity: 0.5 }), [0, 0.07, 0]);
+      break;
+    case 'moignon':
+      add(new THREE.CylinderGeometry(0.16, 0.2, 0.42, 7), skin, [0, 0.21, 0]);
+      add(new THREE.CylinderGeometry(0.21, 0.21, 0.16, 7), mat(0xd8d0c0), [0, 0.3, 0]); // bandage
+      add(new THREE.SphereGeometry(0.06, 5, 4), red, [0.05, 0.43, 0.02]);
+      break;
+    case 'oeilDeVerre':
+      add(new THREE.SphereGeometry(0.2, 10, 8), mat(0xf0ece0, { roughness: 0.15, flatShading: false }), [0, 0.2, 0]);
+      add(new THREE.CircleGeometry(0.09, 10), mat(0x3a6a8a, { roughness: 0.1 }), [0, 0.23, 0.18], [-0.15, 0, 0]);
+      add(new THREE.CircleGeometry(0.04, 8), mat(0x050505), [0, 0.23, 0.185], [-0.15, 0, 0]);
+      break;
+    case 'chienDeFaience':
+      add(new THREE.BoxGeometry(0.22, 0.3, 0.32), china, [0, 0.15, 0]);
+      add(new THREE.BoxGeometry(0.2, 0.2, 0.2), china, [0, 0.4, 0.1]);
+      add(new THREE.BoxGeometry(0.1, 0.08, 0.1), china, [0, 0.36, 0.24]);
+      for (const x of [-0.08, 0.08]) add(new THREE.ConeGeometry(0.04, 0.1, 4), china, [x, 0.54, 0.06]);
+      add(new THREE.BoxGeometry(0.05, 0.05, 0.02), mat(0x1a2a5a), [0.06, 0.43, 0.2]);
+      break;
+    case 'couteauABeurre':
+      add(new THREE.BoxGeometry(0.1, 0.03, 0.42), mat(0xb8b8b0, { metalness: 0.8, roughness: 0.3 }), [0, 0.03, -0.1]);
+      add(new THREE.BoxGeometry(0.08, 0.06, 0.3), mat(0x4a2a1a), [0, 0.04, 0.26]);
+      break;
+    case 'rosaireDos':
+      for (let i = 0; i < 7; i++) {
+        const a = (i / 7) * Math.PI * 2;
+        add(new THREE.BoxGeometry(0.1, 0.1, 0.1), bone, [Math.cos(a) * 0.28, 0.06, Math.sin(a) * 0.28], [0.4, a, 0.3]);
+      }
+      add(new THREE.SphereGeometry(0.1, 6, 5), bone, [0, 0.1, 0.42]);
+      break;
+    case 'miroirSansTain':
+      add(new THREE.BoxGeometry(0.46, 0.6, 0.04), mat(0x2a2018), [0, 0.32, 0], [-0.25, 0, 0]);
+      add(new THREE.PlaneGeometry(0.38, 0.52), mat(0xa8b8c0, { metalness: 0.3, roughness: 0.15, emissive: 0x101418 }), [0, 0.32, 0.025], [-0.25, 0, 0]);
+      break;
+    case 'sixiemeDoigt':
+      add(new THREE.CylinderGeometry(0.06, 0.07, 0.5, 6), skin, [0, 0.07, 0], [Math.PI / 2, 0, 0.3]);
+      add(new THREE.BoxGeometry(0.1, 0.02, 0.12), mat(0x8c7a3c), [0.06, 0.12, -0.2], [0, 0.3, 0]);
+      add(new THREE.CylinderGeometry(0.07, 0.07, 0.01, 6), red, [-0.07, 0.07, 0.24], [Math.PI / 2, 0, 0.3]);
+      break;
+    case 'coeurDansUnBocal':
+      add(new THREE.CylinderGeometry(0.26, 0.26, 0.6, 8, 1, true), mat(0xc8d8c0, { transparent: true, opacity: 0.3, side: THREE.DoubleSide }), [0, 0.3, 0]);
+      add(new THREE.CylinderGeometry(0.28, 0.28, 0.08, 8), mat(0x4a4030, { metalness: 0.6 }), [0, 0.62, 0]);
+      add(new THREE.SphereGeometry(0.15, 7, 6), mat(0x6a0a0a, { roughness: 0.3 }), [0, 0.28, 0]);
+      add(new THREE.ConeGeometry(0.14, 0.18, 7), mat(0x6a0a0a, { roughness: 0.3 }), [0, 0.13, 0], [Math.PI, 0, 0]);
+      break;
+    case 'pacteEnBlanc':
+      add(new THREE.BoxGeometry(0.5, 0.03, 0.68), paper, [0, 0.03, 0], [0, 0.25, 0]);
+      add(new THREE.CylinderGeometry(0.09, 0.09, 0.01, 8), mat(0x5a0606), [-0.1, 0.05, 0.18]);
+      break;
+    case 'doigtDuCreancier':
+      add(new THREE.CylinderGeometry(0.06, 0.07, 0.75, 6), mat(0xf0ece4), [0, 0.07, 0], [Math.PI / 2, 0, -0.2]);
+      for (const z of [-0.1, 0.12]) add(new THREE.SphereGeometry(0.08, 5, 4), mat(0xb8aaa0), [z * 0.2, 0.08, z]);
+      add(new THREE.BoxGeometry(0.1, 0.02, 0.24), mat(0x8c7a3c), [-0.07, 0.12, -0.38], [0.2, -0.2, 0]);
+      break;
+    case 'sourireCousu':
+      add(new THREE.BoxGeometry(0.6, 0.06, 0.2), mat(0x2a1414), [0, 0.03, 0]);
+      for (let i = 0; i < 6; i++) add(new THREE.BoxGeometry(0.06, 0.08, 0.05), mat(0xe8e4d8), [-0.25 + i * 0.1, 0.07, 0]);
+      for (let i = 0; i < 5; i++) add(new THREE.BoxGeometry(0.02, 0.1, 0.26), mat(0x1a1010), [-0.2 + i * 0.1, 0.1, 0], [0, 0.4, 0]);
+      break;
+    case 'seringue':
+      add(new THREE.CylinderGeometry(0.08, 0.08, 0.5, 8), mat(0xd8e8e0, { transparent: true, opacity: 0.6 }), [0, 0.09, 0], [Math.PI / 2, 0, 0.4]);
+      add(new THREE.CylinderGeometry(0.06, 0.06, 0.3, 6), mat(0x8a1010), [0, 0.09, 0], [Math.PI / 2, 0, 0.4]);
+      add(new THREE.CylinderGeometry(0.008, 0.008, 0.3, 4), mat(0xc0c0c0, { metalness: 0.9 }), [0.15, 0.09, -0.32], [Math.PI / 2, 0, 0.4]);
+      add(new THREE.BoxGeometry(0.2, 0.03, 0.03), mat(0xd8e8e0), [-0.1, 0.09, 0.24], [0, 0.4, 0]);
+      break;
+    case 'gobeletFele':
+      add(new THREE.CylinderGeometry(0.24, 0.2, 0.5, 9, 1, true), mat(0x5a3a22, { side: THREE.DoubleSide }), [0, 0.25, 0]);
+      add(new THREE.BoxGeometry(0.03, 0.4, 0.02), mat(0x0a0606), [0.12, 0.27, 0.19], [0, 0, 0.3]);
+      add(new THREE.CircleGeometry(0.2, 9), mat(0x3a2414), [0, 0.01, 0], [-Math.PI / 2, 0, 0]);
+      break;
+    case 'langueDeSerpent':
+      add(new THREE.BoxGeometry(0.12, 0.04, 0.4), mat(0x6a1a2a, { roughness: 0.35 }), [0, 0.03, 0.05]);
+      for (const x of [-0.05, 0.05]) add(new THREE.ConeGeometry(0.03, 0.22, 4), mat(0x6a1a2a), [x * 1.6, 0.03, -0.26], [-Math.PI / 2, 0, 0]);
+      add(new THREE.SphereGeometry(0.05, 5, 4), mat(0x3a8a30, { emissive: 0x1a4a10 }), [0, 0.06, 0.3]);
+      break;
     default:
       add(new THREE.BoxGeometry(0.4, 0.4, 0.4), red, [0, 0.2, 0]);
   }
@@ -114,8 +194,18 @@ interface Slot {
 /** Affiche les reliques possédées, dans l'ordre où elles s'activent. */
 export class RelicShelf {
   private slots: Slot[] = [];
+  /** Une lueur rasante sur le rebord : les reliques ne doivent pas se fondre dans l'ombre. */
+  private readonly light = new THREE.PointLight(0xffc890, 12, 7, 1.5);
 
-  constructor(private readonly scene: THREE.Scene) {}
+  constructor(private readonly scene: THREE.Scene) {
+    this.light.position.set(0.7, 2.6, 11);
+    scene.add(this.light);
+  }
+
+  /** Suit la grande ampoule. */
+  setLight(level: number) {
+    this.light.intensity = 12 * level;
+  }
 
   sync(relics: OwnedRelic[]) {
     const keep = new Set(relics.map((r) => r.uid));

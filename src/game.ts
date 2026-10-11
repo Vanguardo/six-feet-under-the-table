@@ -6,16 +6,19 @@ import { Creditor } from './creditor/creditor';
 import { Cup } from './cup';
 import { Die } from './dice';
 import { CHIPS_COLOR, COIN_COLOR, FloatTexts, MULT_COLOR, XMULT_COLOR } from './floatText';
-import { Hud } from './hud';
+import { Hud, ticketLines } from './hud';
 import { fmtNum, plural, setLang, t } from './i18n';
 import { bossName, bossRule, comboName, dieDesc, dieName, modName, partEffect, partName, rarityName, relicDesc, relicName } from './i18n/names';
 import { Menu } from './menu';
 import { MousePrompt } from './mousePrompt';
+import { PlayerHands } from './playerHands';
+import { Printer } from './printer';
+import { CoinShower } from './coinShower';
 import type { Progress } from './progress';
 import { PactScene } from './pact';
 import { Particles } from './render/particles';
 import { ps1ify } from './render/ps1';
-import { RelicShelf } from './relicShelf';
+import { buildRelicMesh, RelicShelf } from './relicShelf';
 import type { BodyPartId } from './rules/body';
 import { CLOCKMAKER_SECONDS } from './rules/bosses';
 import { COMBOS, evaluateBest, type BestResult, type ComboId } from './rules/combos';
@@ -31,6 +34,13 @@ import { itemTooltip, levelLine, ShopPanel } from './shopUi';
 import { Suitcase } from './suitcase';
 import { DiceTable } from './table';
 import { CUP_INNER_RADIUS, CUP_WALL } from './config';
+
+/** Vitesse du gobelet au lâcher au-delà de laquelle un lancer compte comme violent. */
+const VIOLENT_THROW = 25;
+
+// Gros plan de la boutique : la valise en haut, le tapis de garde et le rebord en bas.
+const SHOP_LOOK = new THREE.Vector3(-0.5, 0.5, 3.4);
+const SHOP_FROM = new THREE.Vector3(-0.5, 11.5, 14.8);
 
 // Intro du tutoriel : le gobelet sort de l'ombre derrière la planche, puis glisse vers le joueur.
 const INTRO_CUP_FROM = new THREE.Vector3(3.6, 0.8, -14);
@@ -57,7 +67,7 @@ export interface Fx {
   dim(level: number, instant?: boolean): void;
   pressure(level: number): void;
   eyes(lost: number): void;
-  lean(point: THREE.Vector3 | null): void;
+  lean(point: THREE.Vector3 | null, from?: THREE.Vector3): void;
 }
 
 interface Sequence {
@@ -80,6 +90,10 @@ export class Game {
   /** Intro muette du tutoriel : début et étape en cours. */
   private introAt = 0;
   private introStage = 0;
+  private pactSkippable = false;
+  private handsShown = true;
+  /** Actions différées (mise en scène), annulées à chaque nouvelle run. */
+  private timers: { at: number; fn: () => void }[] = [];
   private coinsRecorded = false;
   private run = new RunState();
   private readonly table: DiceTable;
@@ -87,6 +101,15 @@ export class Game {
   private readonly floats: FloatTexts;
   private readonly suitcase: Suitcase;
   private readonly mousePrompt: MousePrompt;
+  private readonly hands: PlayerHands;
+  private readonly printer: Printer;
+  private readonly coinShower: CoinShower;
+  /** Pièces gagnées mais encore en vol : la pile ne les montre qu'une fois rangées. */
+  private coinsPending = 0;
+  /** Mains jouées dans l'échéance, imprimées à la suite sur le ticket. */
+  private ticketLog: { name: string; gain: number }[] = [];
+  /** Gros plan sur le ticket : automatique en début d'échéance, ou Tab / clic droit maintenu. */
+  private ticketZoom: 'auto' | 'held' | null = null;
   private readonly panel = new ShopPanel();
   /** Article acheté qui attend qu'on désigne un dé sur le tapis. */
   private targeting: number | null = null;
@@ -101,6 +124,10 @@ export class Game {
   private clock = 0;
   private rollsThisHand = 0;
   private freeRerollUsed = false;
+  /** Seringue : relance d'un seul dé déjà offerte pendant cette main. */
+  private syringeUsed = false;
+  /** Gobelet fêlé : dés qui valent +1 jusqu'à leur prochaine relance. */
+  private readonly cracked = new Set<number>();
   private result: BestResult | null = null;
   private previousResult: BestResult | null = null;
   private revealed = false;
@@ -125,6 +152,7 @@ export class Game {
     private readonly hud: Hud,
     private readonly fx: Fx,
     private readonly progress: Progress,
+    world: RAPIER.World,
   ) {
     // Fumée de feutre : grosse, floue, lente, qui monte à peine.
     this.smoke = new Particles(stage.scene, { max: 320, life: [1.1, 2.0], size: [0.45, 2.4], alpha: 0.14, gravity: 0.3, drag: 2, softness: 1 });
@@ -158,12 +186,16 @@ export class Game {
       clap: () => this.sfx.play('clap', 1),
       slam: () => this.onSlam(),
       chips: (at) => this.woodChips(at),
+      tear: () => this.sfx.burst({ type: 'bandpass', freq: 3200, freqEnd: 1600, q: 0.8, duration: 0.55, volume: 0.7 }),
     });
     this.creditor.objects.forEach(ps1ify);
     this.pact = new PactScene(stage.scene, sfx, fx, this.creditor);
     this.bossProps = new BossProps(stage.scene);
     this.suitcase = new Suitcase(stage.scene, sfx);
     this.mousePrompt = new MousePrompt(stage.scene);
+    this.hands = new PlayerHands(stage.scene);
+    this.printer = new Printer(stage.scene, sfx);
+    this.coinShower = new CoinShower(world, stage.scene, sfx);
     this.bindInput(stage.renderer.domElement);
     this.menu = new Menu(progress, {
       play: (cup, stake) => this.startRun({ cup, stake }),
@@ -195,6 +227,13 @@ export class Game {
       this.lastAction = this.clock;
     };
     window.addEventListener('pointerdown', wake);
+    window.addEventListener('keyup', (e) => {
+      if (e.code === 'Tab') this.holdTicket(false);
+    });
+    canvas.addEventListener('contextmenu', (e) => e.preventDefault());
+    window.addEventListener('pointerup', (e) => {
+      if (e.button === 2) this.holdTicket(false);
+    });
     window.addEventListener('keydown', (e) => {
       wake();
       if (this.menu.open) return;
@@ -206,6 +245,9 @@ export class Game {
       } else if (e.code === 'Space') {
         e.preventDefault();
         this.validate();
+      } else if (e.code === 'Tab') {
+        e.preventDefault();
+        if (!e.repeat) this.holdTicket(true);
       } else if (e.code === 'KeyR' && !e.ctrlKey && !e.metaKey && this.phase === 'over') {
         this.startRun({ cup: this.lastOptions.cup, stake: this.lastOptions.stake });
       } else if (/^Digit[1-6]$/.test(e.code)) {
@@ -216,12 +258,22 @@ export class Game {
       }
     });
     // Infobulles : reliques sur le rebord, dés sur la table. La table met le rayon à jour juste avant.
-    canvas.addEventListener('pointerdown', () => {
+    canvas.addEventListener('pointerdown', (e) => {
+      if (e.button === 2) return this.holdTicket(true);
+      // Un clic pendant le gros plan automatique : on se rassoit tout de suite.
+      if (this.ticketZoom === 'auto') return this.endTicketZoom();
+      // Valider la main : un clic sur le ticket (ou Espace).
+      if (this.phase === 'play' && this.printer.pick(this.table.raycaster) && this.canValidate()) return this.validate();
       if (this.phase === 'shop') this.shopClick();
-      if (this.phase === 'pact') this.pact.click(this.table.raycaster);
+      if (this.phase === 'pact' && this.pact.busy && !this.pact.awaitingSignature && this.pactSkippable) this.pact.skip();
+      else if (this.phase === 'pact') this.pact.click(this.table.raycaster);
     });
     canvas.addEventListener('pointermove', (e) => {
       if (this.table.holding) return this.hud.hideTooltip();
+      if (this.phase === 'play' && this.printer.pick(this.table.raycaster)) {
+        canvas.style.cursor = this.canValidate() ? 'pointer' : 'default';
+        return this.hud.showTooltip(this.canValidate() ? t('ticket.validate') : t('ticket.read'), e.clientX, e.clientY);
+      }
       if (this.phase === 'pact') {
         canvas.style.cursor = this.pact.hover(this.table.raycaster) ? 'pointer' : 'default';
         return this.hud.hideTooltip();
@@ -280,7 +332,11 @@ export class Game {
 
   /** Faces visibles des dés en jeu, avec leur vraie valeur et leur gravure. */
   private faces(): Face[] {
-    return this.table.faces().map(({ die, face }) => faceOf(this.run.dice[die], face, die));
+    return this.table.faces().map(({ die, face }) => {
+      const f = faceOf(this.run.dice[die], face, die);
+      if (!this.cracked.has(die) || f.value === 0) return f;
+      return { ...f, value: Math.min(f.value + 1, Math.max(...DIE_TYPES[this.run.dice[die].type].faces)) };
+    });
   }
 
   private evaluate(faces: Face[]) {
@@ -297,11 +353,16 @@ export class Game {
     return this.run.has('mainCoupee') && !this.freeRerollUsed;
   }
 
+  /** Seringue : une relance d'un seul dé par main ne coûte rien. */
+  private syringeAvailable() {
+    return this.run.has('seringue') && !this.syringeUsed && this.dice.filter((d) => d.active && !d.kept).length === 1;
+  }
+
   private canRoll() {
     if (this.phase !== 'play' || this.run.hands <= 0 || this.validateAt !== null) return false;
     if (this.rollsThisHand === 0) return true;
     if (this.run.bossIs('mere') && this.run.coins < MOTHER_TOLL) return false;
-    return this.run.rerolls > 0 || this.freeRerollAvailable();
+    return this.run.rerolls > 0 || this.freeRerollAvailable() || this.syringeAvailable();
   }
 
   private onRollStart() {
@@ -309,7 +370,10 @@ export class Game {
     this.deadline = null;
     this.rollsThisHand++;
     if (this.rollsThisHand > 1) {
-      if (this.freeRerollAvailable()) {
+      if (this.syringeAvailable()) {
+        this.syringeUsed = true;
+        this.showFlash(t('flash.syringe'));
+      } else if (this.freeRerollAvailable()) {
         this.freeRerollUsed = true;
         this.showFlash(t('flash.freeReroll'));
       } else {
@@ -321,6 +385,8 @@ export class Game {
         this.floats.spawn(`-${MOTHER_TOLL} $`, COIN_COLOR, new THREE.Vector3(-1.6, 1.5, -7.9), this.clock);
       }
     }
+    // Les dés relancés perdent le +1 du Gobelet fêlé.
+    for (const i of [...this.cracked]) if (!this.dice[i].kept) this.cracked.delete(i);
     this.result = null;
     this.revealed = false;
   }
@@ -331,6 +397,16 @@ export class Game {
       const loose = this.table.faces().filter(({ die }) => !this.dice[die].kept);
       const victim = loose[this.run.rng.int(loose.length)];
       if (victim) this.table.dropDie(victim.die);
+    }
+    // Gobelet fêlé : un lancer violent fend un dé, qui vaut +1.
+    if (this.run.has('gobeletFele') && this.table.lastThrowSpeed >= VIOLENT_THROW) {
+      const loose = this.table.faces().filter(({ die }) => !this.dice[die].kept && !this.cracked.has(die));
+      const victim = loose[this.run.rng.int(loose.length)];
+      if (victim) {
+        this.cracked.add(victim.die);
+        this.showFlash(t('flash.cracked'));
+        this.floats.spawn('+1', CHIPS_COLOR, this.dice[victim.die].mesh.position.clone().add(new THREE.Vector3(0, 1, 0)), this.clock);
+      }
     }
     const faces = this.faces();
     // Tutoriel : le créancier tapote les dés qui méritent d'être gardés.
@@ -475,6 +551,7 @@ export class Game {
     if (breakdown.total >= this.run.target - this.run.score && !this.run.has('sourireCousu')) this.creditor.clench();
     this.hud.hideTally();
     this.run.score += breakdown.total;
+    this.ticketLog.push({ name: comboName(result.combo.id), gain: breakdown.total });
     this.run.hands--;
     this.run.handsPlayed++;
     this.run.addBleed(breakdown.bled);
@@ -497,6 +574,8 @@ export class Game {
 
     this.rollsThisHand = 0;
     this.freeRerollUsed = false;
+    this.syringeUsed = false;
+    this.cracked.clear();
     this.result = null;
     this.previousResult = null;
     this.revealed = false;
@@ -542,15 +621,39 @@ export class Game {
     if (this.run.isFinal) {
       this.phase = 'over';
       this.progress.endRun(this.run.cup, this.run.stake, true);
-      this.creditor.vanish();
-      this.hud.showBanner(t('banner.win'), t('banner.winSub'));
-      this.sfx.tone(SCORE_BASE_HZ, 1.2, 0.3);
+      // Le sourire s'efface ; les mains déchirent le contrat, puis reculent dans le noir.
+      this.creditor.tearContract(() => {
+        this.creditor.vanish();
+        this.hud.showBanner(t('banner.win'), t('banner.winSub'));
+        this.sfx.tone(SCORE_BASE_HZ, 1.2, 0.3);
+      });
       return;
     }
     if (this.heartGiven()) return;
     this.hud.showBanner(this.run.isBoss ? t('banner.nightDone', { n: this.run.night }) : t('banner.paid'), t('banner.coins', { n: this.earnings.total }));
+    this.payCoins(this.earnings.total);
     this.sfx.tone(COIN_HZ, 0.15, 0.25, 'square');
     this.sfx.tone(COIN_HZ * 1.5, 0.25, 0.2, 'square');
+  }
+
+  /** Le créancier jette la paie sur la table ; les pièces finissent sur ta pile. */
+  private payCoins(total: number) {
+    if (total <= 0) return;
+    this.coinsPending += total;
+    this.payoutUntil = Math.max(this.payoutUntil, this.clock + 3.2);
+    const run = this.run;
+    this.creditor.toss(() => {
+      if (this.run !== run) return;
+      this.coinShower.throw(
+        new THREE.Vector3(1.8, 2.6, -5.6),
+        total,
+        () => this.printer.coinWorld(this.run.coins - this.coinsPending),
+        (value) => {
+          this.coinsPending = Math.max(0, this.coinsPending - value);
+          this.printer.setCoins(this.run.coins - this.coinsPending, false);
+        },
+      );
+    });
   }
 
   private stepPayout() {
@@ -569,6 +672,8 @@ export class Game {
     this.bossProps.show(null, this.clock);
     this.fillSuitcase(true);
     this.suitcase.open();
+    // On se penche sur la valise : les articles et leurs prix se lisent, le tapis de dés reste en bas.
+    this.fx.lean(SHOP_LOOK, SHOP_FROM);
     // Tes dés s'alignent sur le tapis : ce sont les cibles des burins et des échanges.
     this.table.displayInTray(
       this.run.dice.map((_, i) => i),
@@ -616,6 +721,8 @@ export class Game {
   }
 
   private sign(part: BodyPartId) {
+    // La mise en scène ne se passe pas la première fois ; ensuite, un clic l'abrège.
+    this.pactSkippable = this.progress.stats.pacts > 0;
     this.run.signPact(part);
     if (!this.run.tutorial) this.progress.record({ type: 'pact', part, inRun: this.run.body.pacts });
     this.sfx.toneAt(0, 196, 180, 0.6, 0.2); // le pouce sur le papier
@@ -655,6 +762,9 @@ export class Game {
     this.sfx.setDeaf(this.run.body.ear);
     this.fx.eyes(this.run.body.eyes);
     this.cup.setBlind(this.run.body.blind);
+    this.hands.setBody(this.run.body);
+    // Avec une seule main, le gobelet tremble pendant la secousse.
+    this.table.tremble = this.run.body.hand ? 1 : 0;
   }
 
   private gameOver() {
@@ -665,11 +775,20 @@ export class Game {
     // Il frappe deux fois. Puis la lumière baisse.
     this.creditor.knock(2, () => {
       if (this.phase !== 'over') return;
-      this.stage.lightLevel.value = 0.45;
-      this.fx.dim(0.6);
-      this.hud.showBanner(t('banner.death'), t('banner.deathSub', { where, score: fmt(score), target: fmt(target) }));
+      // Noir complet : on n'entend plus que ce qui se passe.
+      this.stage.lightLevel.value = 0;
+      this.fx.dim(0, true);
       this.sfx.tone(98, 1.4, 0.35, 'sawtooth');
       this.sfx.tone(92, 1.6, 0.3, 'sawtooth');
+      this.sfx.burst({ type: 'lowpass', freq: 500, duration: 0.5, volume: 0.9, delay: 1.1 });
+      this.sfx.toneAt(1.15, 130, 40, 0.4, 0.6);
+      // Puis le sourire, seul dans le noir : la dernière image.
+      this.later(2.6, () => {
+        if (this.phase !== 'over') return;
+        this.creditor.showSmile(true);
+        this.fx.dim(0.55);
+        this.hud.showBanner(t('banner.death'), t('banner.deathSub', { where, score: fmt(score), target: fmt(target) }));
+      });
     });
   }
 
@@ -812,6 +931,15 @@ export class Game {
   private openRelicMenu(index: number) {
     this.panel.relicMenu(this.run, index, {
       sell: () => {
+        const sold = this.run.relics[index];
+        if (sold) {
+          // Il traverse la table, ramasse la relique et la fait disparaître dans sa manche.
+          const copy = buildRelicMesh(sold.def.id);
+          copy.position.copy(this.shelf.position(index));
+          ps1ify(copy);
+          this.stage.scene.add(copy);
+          this.creditor.snatch(copy);
+        }
         this.run.sell(index);
         this.progress.record({ type: 'sold' });
         this.sfx.tone(523, 0.12, 0.2);
@@ -840,6 +968,7 @@ export class Game {
   }
 
   private leaveShop() {
+    this.fx.lean(null);
     this.panel.hide();
     this.targeting = null;
     this.earnings = null;
@@ -863,7 +992,8 @@ export class Game {
     this.table.collectDice();
     const boss = this.run.boss;
     this.bossProps.show(boss?.id ?? null, this.clock);
-    this.creditor.engrave(fmt(this.run.target));
+    this.ticketLog = [];
+    this.printTicket();
     if (boss) this.showFlash(t('flash.boss', { name: bossName(boss), rule: bossRule(boss) }));
     if (this.run.confiscated >= 0) this.showFlash(t('flash.confiscated', { die: dieName(this.run.dice[this.run.confiscated].type).toLowerCase() }));
   }
@@ -872,6 +1002,7 @@ export class Game {
   startRun(o: RunOptions) {
     this.lastOptions = o;
     this.menu.hide();
+    this.timers = [];
     this.cup.mesh.visible = true;
     document.body.classList.remove('in-intro');
     this.run = new RunState({ ...o, unlocked: this.progress.unlockedRelics() });
@@ -879,6 +1010,8 @@ export class Game {
     this.sequence = null;
     this.rollsThisHand = 0;
     this.freeRerollUsed = false;
+    this.syringeUsed = false;
+    this.cracked.clear();
     this.result = null;
     this.previousResult = null;
     this.revealed = false;
@@ -893,6 +1026,10 @@ export class Game {
     this.hud.hideTally();
     this.pact.reset();
     this.fx.lean(null);
+    this.ticketZoom = null;
+    this.printer.reset();
+    this.coinShower.clear();
+    this.coinsPending = 0;
     this.table.reset();
     this.creditor.reset();
     this.cup.setTint(CUPS.find((c) => c.id === this.run.cup)?.tint ?? 0xffffff);
@@ -904,12 +1041,21 @@ export class Game {
     this.startEcheance();
   }
 
+  private later(delay: number, fn: () => void) {
+    this.timers.push({ at: this.clock + delay, fn });
+    this.timers.sort((a, b) => a.at - b.at);
+  }
+
   /** Le tutoriel muet : noir, l'ampoule s'allume, et le créancier montre tout du doigt. */
   startTutorial() {
     this.startRun({ tutorial: true });
     // Noir complet. Il était déjà là : l'ampoule grésille et le révèle.
     this.phase = 'intro';
     this.introAt = this.clock;
+    // Le ticket sera lu après l'intro, pas dans le noir.
+    this.timers = [];
+    this.ticketZoom = null;
+    this.fx.lean(null);
     this.introStage = 0;
     this.creditor.reset(); // pas de gravure avant qu'il ait posé le gobelet
     this.creditor.showSmile(false);
@@ -964,12 +1110,47 @@ export class Game {
     this.lastAction = this.clock;
     this.syncDice(true);
     this.table.collectDice();
-    this.creditor.engrave(fmt(this.run.target));
+    this.printTicket();
+  }
+
+  /**
+   * Nouvelle échéance : l'imprimante crache le ticket et on se penche pour le lire,
+   * puis on se rassoit et le créancier grave l'objectif. Un clic abrège.
+   */
+  private printTicket() {
+    this.printer.setContent(ticketLines(this.hudState(), this.ticketLog), true);
+    if (this.phase === 'intro') return;
+    this.ticketZoom = 'auto';
+    const f = this.printer.focus();
+    this.fx.lean(f.look, f.from);
+    const run = this.run;
+    this.later(this.printer.printTime + 1.4, () => {
+      if (this.run === run && this.ticketZoom === 'auto') this.endTicketZoom();
+    });
+  }
+
+  private endTicketZoom() {
+    const wasAuto = this.ticketZoom === 'auto';
+    this.ticketZoom = null;
+    if (this.phase !== 'pact') this.fx.lean(null);
+    if (wasAuto && this.phase === 'play') this.creditor.engrave(fmt(this.run.target));
+  }
+
+  /** Tab ou clic droit maintenu : on se penche sur le ticket pour le relire. */
+  private holdTicket(on: boolean) {
+    if (on && this.ticketZoom === null && (this.phase === 'play' || this.phase === 'scoring' || this.phase === 'payout')) {
+      this.ticketZoom = 'held';
+      const f = this.printer.focus();
+      this.fx.lean(f.look, f.from);
+    } else if (!on && this.ticketZoom === 'held') {
+      this.endTicketZoom();
+    }
   }
 
   /** Retour au menu principal. */
   private openMenu() {
     this.phase = 'menu';
+    this.timers = [];
     document.body.classList.remove('in-intro');
     this.hud.hideBanner();
     this.hud.hideTally();
@@ -994,6 +1175,7 @@ export class Game {
     setLang(st.lang);
     this.sfx.setVolume(st.volume);
     this.pact.softGore = st.softGore;
+    this.table.simpleThrow = !!st.simpleThrow;
   }
 
   // ---------------------------------------------------------------- boucle
@@ -1010,8 +1192,15 @@ export class Game {
       this.progress.record({ type: 'coins', amount: this.run.coins });
     }
     if (this.phase === 'intro') this.stepIntro();
+    while (this.timers.length > 0 && this.clock >= this.timers[0].at) this.timers.shift()!.fn();
     this.table.step(dt);
     this.pact.update(dt);
+    this.pact.shelf.setLight(this.stage.lightLevel.value);
+    this.hands.setLight(this.stage.lightLevel.value);
+    this.printer.update(dt);
+    this.coinShower.update(dt);
+    this.printer.setLight(this.stage.lightLevel.value);
+    this.shelf.setLight(this.stage.lightLevel.value);
     if (this.phase === 'scoring') this.stepScoring();
     if (this.phase === 'payout') this.stepPayout();
     if (this.validateAt !== null && this.clock >= this.validateAt && this.table.idle) {
@@ -1033,11 +1222,21 @@ export class Game {
     this.bossProps.update(this.clock);
     this.suitcase.update(dt, this.clock);
     // Au début de chaque main, le gobelet s'entoure de jaune et une souris montre le geste.
-    const awaitingRoll = this.phase === 'play' && this.table.idle && this.rollsThisHand === 0 && this.run.hands > 0 && this.validateAt === null;
+    const awaitingRoll = this.phase === 'play' && this.table.idle && this.rollsThisHand === 0 && this.run.hands > 0 && this.validateAt === null && this.ticketZoom === null;
     this.cup.setPrompt(awaitingRoll);
     this.cup.updatePrompt(dt, this.clock);
     this.mousePrompt.show(awaitingRoll);
     this.mousePrompt.update(dt, this.clock, this.cup.position);
+    // Pendant le pacte, seul le pouce qui signe est à l'écran.
+    const showHands = this.phase !== 'pact';
+    if (showHands !== this.handsShown) {
+      this.handsShown = showHands;
+      this.hands.setVisible(showHands);
+      if (showHands) this.hands.setBody(this.run.body);
+    }
+    // La main droite reste posée sur le gobelet dès qu'il est de ton côté.
+    const cupHome = this.phase !== 'intro' && this.cup.position.z > 4;
+    this.hands.update(dt, this.clock, cupHome ? { position: this.cup.position, quaternion: this.cup.quaternion } : null, this.table.holding);
     this.smoke.update(dt);
     this.chips.update(dt);
     this.ambience.update(dt);
@@ -1066,11 +1265,23 @@ export class Game {
     this.table.render();
     this.shelf.update(this.clock);
     this.floats.update(this.clock);
+    const state = this.hudState();
+    this.hud.update(state);
+    if (this.phase !== 'menu') this.printer.setContent(ticketLines(state, this.ticketLog));
+    this.printer.setCoins(this.run.coins - this.coinsPending);
+    this.printer.setGlow(!!state.pulse);
+  }
+
+  private canValidate() {
+    return this.phase === 'play' && this.table.idle && this.rollsThisHand > 0 && this.validateAt === null;
+  }
+
+  private hudState() {
     const levels = (Object.keys(COMBOS) as ComboId[])
       .filter((id) => (this.run.effectiveLevels()[id] ?? 1) > 1)
       .map((id) => levelLine(this.run, id));
     const boss = this.run.boss;
-    this.hud.update({
+    return {
       night: this.run.night,
       echeance: this.run.echeance,
       isBoss: this.run.isBoss,
@@ -1086,11 +1297,11 @@ export class Game {
       timer: this.deadline !== null && this.phase === 'play' ? Math.max(0, this.deadline - this.clock) : null,
       curse: this.run.curse,
       contracts: MAX_PACTS - this.run.pactsSigned,
-      canValidate: this.phase === 'play' && this.table.idle && this.rollsThisHand > 0 && this.validateAt === null,
-      // Tutoriel : le bouton de validation pulse dès le premier lancer.
+      canValidate: this.canValidate(),
+      // Tutoriel : le ticket luit dès le premier lancer, c'est là qu'on valide.
       pulse: this.run.tutorial && this.phase === 'play' && this.rollsThisHand > 0,
       hint: this.hint(),
-    });
+    };
   }
 
   private showFlash(text: string) {
@@ -1116,7 +1327,7 @@ export class Game {
       case 'play':
         if (this.table.holding) return t('hint.shake');
         if (this.table.rolling) return '';
-        if (this.rollsThisHand === 0) return t('hint.grab');
+        if (this.rollsThisHand === 0) return t(this.table.simpleThrow ? 'hint.grabSimple' : 'hint.grab');
         if (!this.canRoll() || !this.table.hasLooseDice()) return t('hint.validate');
         return t('hint.keep');
     }

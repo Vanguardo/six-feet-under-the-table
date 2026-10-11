@@ -335,6 +335,16 @@ export class RunState {
       const mod = this.rng.pick(SHOP_MODS);
       items.push({ kind: 'burin', mod, price: this.price(FACE_MODS[mod].price) });
     }
+    // Langue de serpent : un article maudit en plus, un peu moins cher.
+    if (this.has('langueDeSerpent')) {
+      const cursed = RELICS.filter((d) => d.rarity === 'maudite' && !taken.has(d.id) && (!this.unlocked || this.unlocked.has(d.id)));
+      if (cursed.length > 0) {
+        const def = this.rng.pick(cursed);
+        items.push({ kind: 'relic', def, price: Math.max(1, this.price(def.price) - 2) });
+      } else {
+        items.push({ kind: 'die', type: 'maudit', price: Math.max(1, this.price(DIE_TYPES.maudit.price) - 1) });
+      }
+    }
     this.shop = items;
   }
 

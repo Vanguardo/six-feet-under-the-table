@@ -210,6 +210,8 @@ export class Menu {
        <div class="setting"><span>${t('menu.volume')}</span><input type="range" min="0" max="100" value="${Math.round(st.volume * 100)}" data-action="volume"></div>
        <div class="setting"><span>${t('menu.softGore')}<small>${t('menu.softGoreHint')}</small></span>
          <button data-action="gore" class="${st.softGore ? 'on' : ''}">${st.softGore ? t('menu.on') : t('menu.off')}</button></div>
+       <div class="setting"><span>${t('menu.simpleThrow')}<small>${t('menu.simpleThrowHint')}</small></span>
+         <button data-action="simple" class="${st.simpleThrow ? 'on' : ''}">${st.simpleThrow ? t('menu.on') : t('menu.off')}</button></div>
        <div class="setting"><span>${t('menu.fullscreen')}</span><button data-action="fullscreen">${t('menu.toggle')}</button></div>
        <div class="setting"><span>${t('menu.reset')}<small>${t('menu.resetHint')}</small></span><button data-action="reset">${t('menu.resetButton')}</button></div>
        <div class="row"><button data-action="back">${t('menu.back')}</button></div>`,
@@ -217,6 +219,11 @@ export class Menu {
         lang: this.setLangAnd(() => this.settings(back)),
         gore: () => {
           this.progress.updateSettings({ softGore: !st.softGore });
+          this.actions.settings();
+          this.settings(back);
+        },
+        simple: () => {
+          this.progress.updateSettings({ simpleThrow: !st.simpleThrow });
           this.actions.settings();
           this.settings(back);
         },

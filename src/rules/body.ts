@@ -34,6 +34,17 @@ export class Body {
   heart = false;
   /** Pactes signés (tous types confondus). */
   pacts = 0;
+  /** Doigts déjà perdus quand la main gauche a été prise : ils étaient sur elle. */
+  fingersAtHand = 0;
+
+  /** Les doigts partent d'abord de la main gauche, de l'auriculaire vers l'index. */
+  get leftFingersLost() {
+    return this.hand ? 4 : Math.min(this.fingers, 4);
+  }
+
+  get rightFingersLost() {
+    return this.hand ? this.fingers - Math.min(this.fingersAtHand, 4) : Math.max(0, this.fingers - 4);
+  }
 
   /** Nombre total de morceaux perdus. */
   get lost() {
@@ -47,7 +58,7 @@ export class Body {
   /** Ce qui peut encore être pris. Le cœur n'est proposé qu'en tout dernier recours. */
   available(): BodyPartId[] {
     const list: BodyPartId[] = [];
-    if (this.fingers < MAX_FINGERS) list.push('doigt');
+    if (this.fingers < MAX_FINGERS && this.rightFingersLost < 4) list.push('doigt');
     if (this.teeth < MAX_TEETH) list.push('dent');
     if (!this.ear) list.push('oreille');
     if (!this.tongue) list.push('langue');
@@ -76,6 +87,7 @@ export class Body {
         this.eyes++;
         break;
       case 'main':
+        this.fingersAtHand = this.fingers;
         this.hand = true;
         break;
       case 'coeur':
