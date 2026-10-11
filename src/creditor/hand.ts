@@ -30,6 +30,7 @@ export interface HandLook {
 
 export const CREDITOR_HANDS: HandLook = { skin: 0xffffff, knuckle: 0xb8aaa0, nail: 0x8c7a3c, sleeve: 0x0b0808, cuff: 0x4a4038 };
 export const MERCHANT_HANDS: HandLook = { skin: 0x6a6450, knuckle: 0x7a6a50, nail: 0x1a1410, sleeve: 0x2a1e12, cuff: 0x3a2c1c };
+export const PLAYER_HANDS: HandLook = { skin: 0xe8cdb8, knuckle: 0xc8a090, nail: 0xd8c8b0, sleeve: 0x000000, cuff: 0x000000 };
 
 const materialsFor = (look: HandLook) => ({
   skin: new THREE.MeshStandardMaterial({ map: skinTexture(), color: look.skin, roughness: 0.75, flatShading: true }),
@@ -62,7 +63,8 @@ export class Hand {
 
   private readonly m: ReturnType<typeof materialsFor>;
 
-  constructor(mirror: boolean, look: HandLook = CREDITOR_HANDS) {
+  /** `bare` : main coupée, sans manche ni manchette, le poignet tranché à vif. */
+  constructor(mirror: boolean, look: HandLook = CREDITOR_HANDS, bare = false) {
     this.m = materialsFor(look);
     const { skin, knuckleSkin, sleeve, cuff } = this.m;
     const body = new THREE.Group();
@@ -86,8 +88,13 @@ export class Hand {
     // Os du poignet, manchette de chemise sale, manche noire qui s'enfonce dans l'ombre.
     add(new THREE.BoxGeometry(0.64, 0.3, 0.3), skin, [0, 0, -0.08]);
     add(new THREE.SphereGeometry(0.07, 5, 4), knuckleSkin, [0.3, 0.1, -0.05]);
-    add(new THREE.BoxGeometry(0.78, 0.5, 0.3), cuff, [0, 0.03, -0.38]);
-    add(new THREE.BoxGeometry(0.72, 0.48, 5), sleeve, [0, 0.05, -3.0]);
+    if (bare) {
+      add(new THREE.BoxGeometry(0.6, 0.27, 0.04), new THREE.MeshStandardMaterial({ color: 0x5a0808, roughness: 0.3 }), [0, 0, -0.24]);
+      add(new THREE.CylinderGeometry(0.06, 0.06, 0.05, 5).rotateX(Math.PI / 2), new THREE.MeshStandardMaterial({ color: 0xe0d8c0 }), [0.1, 0, -0.26]);
+    } else {
+      add(new THREE.BoxGeometry(0.78, 0.5, 0.3), cuff, [0, 0.03, -0.38]);
+      add(new THREE.BoxGeometry(0.72, 0.48, 5), sleeve, [0, 0.05, -3.0]);
+    }
 
     for (const f of FINGERS) {
       // Jointure saillante à la base de chaque doigt.

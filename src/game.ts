@@ -7,25 +7,36 @@ import { Cup } from './cup';
 import { Die } from './dice';
 import { CHIPS_COLOR, COIN_COLOR, FloatTexts, MULT_COLOR, XMULT_COLOR } from './floatText';
 import { Hud } from './hud';
+import { fmtNum, plural, setLang, t } from './i18n';
+import { bossName, bossRule, comboName, dieDesc, dieName, modName, partEffect, partName, rarityName, relicDesc, relicName } from './i18n/names';
+import { Menu } from './menu';
 import { MousePrompt } from './mousePrompt';
+import type { Progress } from './progress';
 import { PactScene } from './pact';
 import { Particles } from './render/particles';
 import { ps1ify } from './render/ps1';
 import { RelicShelf } from './relicShelf';
-import { BODY_PARTS, type BodyPartId } from './rules/body';
+import type { BodyPartId } from './rules/body';
 import { CLOCKMAKER_SECONDS } from './rules/bosses';
 import { COMBOS, evaluateBest, type BestResult, type ComboId } from './rules/combos';
-import { DIE_TYPES, FACE_MODS, faceOf, newDie, type Face } from './rules/dice';
-import { RARITY_LABEL, type Effect } from './rules/relics';
-import { needsTarget, RunState, type Earnings } from './rules/run';
+import { DIE_TYPES, faceOf, newDie, type Face } from './rules/dice';
+import type { Effect } from './rules/relics';
+import { CUPS } from './rules/cups';
+import { findRelic } from './rules/relics';
+import { MAX_PACTS, needsTarget, RunState, type Earnings, type RunOptions } from './rules/run';
 import { scoreHand, type ScoreBreakdown, type ScoreStep } from './rules/scoring';
 import type { Stage } from './scene';
 import type { Sfx } from './sfx';
 import { itemTooltip, levelLine, ShopPanel } from './shopUi';
 import { Suitcase } from './suitcase';
 import { DiceTable } from './table';
+import { CUP_INNER_RADIUS, CUP_WALL } from './config';
 
-type Phase = 'play' | 'scoring' | 'payout' | 'pact' | 'shop' | 'over';
+// Intro du tutoriel : le gobelet sort de l'ombre derrière la planche, puis glisse vers le joueur.
+const INTRO_CUP_FROM = new THREE.Vector3(3.6, 0.8, -14);
+const INTRO_CUP_TO = new THREE.Vector3(4.6, 0, -4.2);
+
+type Phase = 'menu' | 'intro' | 'play' | 'scoring' | 'payout' | 'pact' | 'shop' | 'over';
 
 const SCORE_NOTES = [0, 3, 5, 7, 10, 12, 15, 17, 19, 22, 24];
 const SCORE_BASE_HZ = 262;
@@ -43,7 +54,7 @@ export interface Fx {
   jolt(amount: number): void;
   tear(amount: number): void;
   aberration(amount: number): void;
-  dim(level: number): void;
+  dim(level: number, instant?: boolean): void;
   pressure(level: number): void;
   eyes(lost: number): void;
   lean(point: THREE.Vector3 | null): void;
@@ -60,7 +71,16 @@ interface Sequence {
 
 /** La run : échéances, scoring animé, boss, pactes, boutique, fin de partie. */
 export class Game {
-  private phase: Phase = 'play';
+  private phase: Phase = 'menu';
+  /** Réglages de la dernière run lancée, pour « rejouer » (touche R). */
+  private lastOptions: RunOptions = {};
+  private readonly menu: Menu;
+  /** Le tutoriel rallume l'ampoule progressivement. */
+  private lightUp = 1;
+  /** Intro muette du tutoriel : début et étape en cours. */
+  private introAt = 0;
+  private introStage = 0;
+  private coinsRecorded = false;
   private run = new RunState();
   private readonly table: DiceTable;
   private readonly shelf: RelicShelf;
@@ -104,6 +124,7 @@ export class Game {
     private readonly sfx: Sfx,
     private readonly hud: Hud,
     private readonly fx: Fx,
+    private readonly progress: Progress,
   ) {
     // Fumée de feutre : grosse, floue, lente, qui monte à peine.
     this.smoke = new Particles(stage.scene, { max: 320, life: [1.1, 2.0], size: [0.45, 2.4], alpha: 0.14, gravity: 0.3, drag: 2, softness: 1 });
@@ -118,7 +139,7 @@ export class Game {
         canRoll: () => this.canRoll(),
         canKeep: () => this.phase === 'play' && this.rollsThisHand > 0,
         onRollStart: () => this.onRollStart(),
-        onRollRefused: () => this.showFlash('Trop mou. Secoue plus longtemps.'),
+        onRollRefused: () => this.showFlash(t('flash.weak')),
         onSettled: () => this.onSettled(),
         onRevealed: () => {
           this.revealed = true;
@@ -144,7 +165,25 @@ export class Game {
     this.suitcase = new Suitcase(stage.scene, sfx);
     this.mousePrompt = new MousePrompt(stage.scene);
     this.bindInput(stage.renderer.domElement);
-    this.startEcheance();
+    this.menu = new Menu(progress, {
+      play: (cup, stake) => this.startRun({ cup, stake }),
+      tutorial: () => this.startTutorial(),
+      settings: () => this.applySettings(),
+    });
+    progress.onUnlock((u) => {
+      const what = u.kind === 'relic' ? relicName(findRelic(u.id)) : t(`cup.${u.id}.name`);
+      this.menu.toast(t('flash.unlocked', { what }));
+      this.sfx.tone(COIN_HZ * 1.5, 0.3, 0.2);
+    });
+    this.applySettings();
+    // La table attend, dés dans le gobelet, pendant que le menu est ouvert.
+    this.syncDice(true);
+    this.table.collectDice();
+    this.menu.warning(() => {
+      this.sfx.unlock();
+      this.ambience.start();
+      this.menu.title();
+    });
   }
 
   // ---------------------------------------------------------------- entrées
@@ -158,13 +197,17 @@ export class Game {
     window.addEventListener('pointerdown', wake);
     window.addEventListener('keydown', (e) => {
       wake();
+      if (this.menu.open) return;
       if (e.code === 'Escape' && this.targeting !== null) {
         this.cancelTarget();
+      } else if (e.code === 'Escape') {
+        if (this.phase === 'over') this.openMenu();
+        else this.menu.pause(() => this.menu.hide(), () => this.quitRun());
       } else if (e.code === 'Space') {
         e.preventDefault();
         this.validate();
       } else if (e.code === 'KeyR' && !e.ctrlKey && !e.metaKey && this.phase === 'over') {
-        this.newRun();
+        this.startRun({ cup: this.lastOptions.cup, stake: this.lastOptions.stake });
       } else if (/^Digit[1-6]$/.test(e.code)) {
         // Les chiffres suivent les dés en jeu, dans l'ordre.
         const active = this.run.activeDice();
@@ -191,15 +234,15 @@ export class Game {
           const item = this.run.shop[target.index];
           if (item) return this.hud.showTooltip(itemTooltip(item), e.clientX, e.clientY);
         }
-        if (target?.kind === 'bell') return this.hud.showTooltip(`<b>Sonnette</b><br>Relancer la valise : ${this.run.rerollCost} $`, e.clientX, e.clientY);
-        if (target?.kind === 'lid') return this.hud.showTooltip('<b>Refermer la valise</b><br>Passer à la suite', e.clientX, e.clientY);
+        if (target?.kind === 'bell') return this.hud.showTooltip(t('shop.bell', { n: this.run.rerollCost }), e.clientX, e.clientY);
+        if (target?.kind === 'lid') return this.hud.showTooltip(t('shop.lid'), e.clientX, e.clientY);
       }
       const i = this.shelf.pick(this.table.raycaster);
       const relic = this.run.relics[i];
       if (relic) {
         const status = relic.def.status ? `<br><b>${relic.def.status(relic.state)}</b>` : '';
         return this.hud.showTooltip(
-          `<b>${relic.def.name}</b> · ${RARITY_LABEL[relic.def.rarity]}<br>${relic.def.description}${status}`,
+          `<b>${relicName(relic.def)}</b> · ${rarityName(relic.def.rarity)}<br>${relicDesc(relic.def)}${status}`,
           e.clientX,
           e.clientY,
         );
@@ -209,11 +252,11 @@ export class Game {
       const owned = this.run.dice[die];
       if (!owned) return this.hud.hideTooltip();
       const type = DIE_TYPES[owned.type];
-      const mods = owned.mods.map((m, f) => (m ? `<br>Face ${type.faces[f]} : ${FACE_MODS[m].name}` : '')).join('');
+      const mods = owned.mods.map((m, f) => (m ? `<br>${t('shop.face', { v: type.faces[f], mod: modName(m) })}` : '')).join('');
       const pending = this.targeting !== null ? this.run.shop[this.targeting] : null;
-      const action = pending ? `<br><b>${pending.kind === 'die' ? 'Clic : remplacer ce dé' : 'Clic : graver une face de ce dé'}</b>` : '';
+      const action = pending ? `<br><b>${pending.kind === 'die' ? t('shop.clickReplace') : t('shop.clickEngrave')}</b>` : '';
       canvas.style.cursor = pending ? 'pointer' : 'default';
-      this.hud.showTooltip(`<b>${type.name}</b><br>${type.description}${mods}${action}`, e.clientX, e.clientY);
+      this.hud.showTooltip(`<b>${dieName(owned.type)}</b><br>${dieDesc(owned.type)}${mods}${action}`, e.clientX, e.clientY);
     });
   }
 
@@ -268,7 +311,7 @@ export class Game {
     if (this.rollsThisHand > 1) {
       if (this.freeRerollAvailable()) {
         this.freeRerollUsed = true;
-        this.showFlash('Main coupée : relance gratuite');
+        this.showFlash(t('flash.freeReroll'));
       } else {
         this.run.rerolls--;
       }
@@ -283,7 +326,21 @@ export class Game {
   }
 
   private onSettled() {
+    // Gobelet percé : au premier lancer de la main, un dé passe par le trou.
+    if (this.run.leaky && this.rollsThisHand === 1) {
+      const loose = this.table.faces().filter(({ die }) => !this.dice[die].kept);
+      const victim = loose[this.run.rng.int(loose.length)];
+      if (victim) this.table.dropDie(victim.die);
+    }
     const faces = this.faces();
+    // Tutoriel : le créancier tapote les dés qui méritent d'être gardés.
+    if (this.run.tutorial && this.rollsThisHand === 1 && this.run.handsPlayed === 0 && this.run.echeance === 0) {
+      const byValue = new Map<number, number[]>();
+      for (const f of faces) byValue.set(f.value, [...(byValue.get(f.value) ?? []), f.die]);
+      const group = [...byValue.values()].sort((a, b) => b.length - a.length)[0] ?? [];
+      const pick = group.length >= 2 ? group : [faces.reduce((a, b) => (b.value > a.value ? b : a)).die];
+      this.creditor.point(pick.map((d) => this.dice[d].mesh.position.clone()));
+    }
     const result = this.evaluate(faces);
     // Pièce trouée : une relance qui n'améliore pas la combinaison la nourrit.
     if (this.previousResult && result.score <= this.previousResult.score) {
@@ -329,7 +386,7 @@ export class Game {
         const worst = DIE_TYPES[owned.type].faces.reduce((w, v, f, all) => (v < all[w] ? f : w), 0);
         this.table.flip(best.die, worst);
         this.creditor.sneer(1);
-        this.showFlash('Le créancier retourne ton meilleur dé');
+        this.showFlash(t('flash.creditorFlip'));
         this.validateAt = this.clock + 0.9;
         return;
       }
@@ -356,7 +413,7 @@ export class Game {
     });
     this.phase = 'scoring';
     this.result = result;
-    this.hud.showTally(result.level > 1 ? `${result.combo.name} niv. ${result.level}` : result.combo.name);
+    this.hud.showTally(result.level > 1 ? `${comboName(result.combo.id)} ${t('hud.level', { n: result.level })}` : comboName(result.combo.id));
     this.hud.setTally(breakdown.steps[0].chips, breakdown.steps[0].mult);
     this.sfx.play('wood', 0.8);
     this.sequence = { breakdown, faces, next: 1, nextAt: this.clock + 0.4, totalAt: -1, endAt: -1 };
@@ -404,7 +461,7 @@ export class Game {
     } else {
       // Malédiction ou règle du boss : le texte vient de l'ardoise.
       const [text, color] = effectLabel(step.effect);
-      this.floats.spawn(step.label ? `${step.label} ${text}` : text, color, new THREE.Vector3(0, 2.5, -7.6), this.clock, 1.1);
+      this.floats.spawn(step.label ? `${t(`step.${step.label}`)} ${text}` : text, color, new THREE.Vector3(0, 2.5, -7.6), this.clock, 1.1);
       this.sfx.tone(note / 2, 0.4, 0.3, 'sawtooth');
     }
   }
@@ -421,6 +478,10 @@ export class Game {
     this.run.hands--;
     this.run.handsPlayed++;
     this.run.addBleed(breakdown.bled);
+    if (!this.run.tutorial) {
+      const five = result.combo.id === 'cinq';
+      this.progress.record({ type: 'hand', five, fiveOfOnes: five && faces.every((f) => f.value === 1) });
+    }
     this.run.played.push(result.combo.id);
     for (const r of this.run.relics) r.def.afterHand?.(r.state);
     // Les 0 des dés maudits maudissent la main suivante.
@@ -441,6 +502,8 @@ export class Game {
     this.revealed = false;
     this.unveiled = false;
     this.flipped = false;
+    // Le dé tombé par le trou du gobelet revient pour la main suivante.
+    this.syncDice(true);
     this.table.collectDice();
 
     if (this.run.score >= this.run.target) this.startPayout();
@@ -450,7 +513,7 @@ export class Game {
 
   /** Un dé usé se brise ; un dé en os ordinaire prend sa place. */
   private shatter(die: number) {
-    const name = DIE_TYPES[this.run.dice[die].type].name;
+    const name = dieName(this.run.dice[die].type);
     const at = this.dice[die].mesh.position.clone();
     this.run.dice[die] = newDie('os');
     for (let i = 0; i < 14; i++) {
@@ -463,7 +526,7 @@ export class Game {
     }
     this.sfx.burst({ type: 'highpass', freq: 3500, duration: 0.3, volume: 0.8 });
     this.sfx.burst({ type: 'bandpass', freq: 6000, q: 4, duration: 0.5, volume: 0.4, delay: 0.05 });
-    this.showFlash(`${name} se brise`);
+    this.showFlash(t('flash.shatter', { name }));
     this.syncDice(false);
   }
 
@@ -474,15 +537,18 @@ export class Game {
     this.earnings = this.run.earnings();
     this.run.coins += this.earnings.total;
     this.payoutUntil = this.clock + PAYOUT_DURATION;
+    if (this.run.tutorial && this.run.echeance === 0) this.creditor.showSmile(true);
+    if (this.run.isBoss && !this.run.tutorial) this.progress.record({ type: 'boss' });
     if (this.run.isFinal) {
       this.phase = 'over';
+      this.progress.endRun(this.run.cup, this.run.stake, true);
       this.creditor.vanish();
-      this.hud.showBanner('DETTE PAYÉE', 'Le sourire disparaît. R pour une nouvelle run');
+      this.hud.showBanner(t('banner.win'), t('banner.winSub'));
       this.sfx.tone(SCORE_BASE_HZ, 1.2, 0.3);
       return;
     }
     if (this.heartGiven()) return;
-    this.hud.showBanner(this.run.isBoss ? `NUIT ${this.run.night} TERMINÉE` : 'ÉCHÉANCE PAYÉE', `+${this.earnings.total} pièces`);
+    this.hud.showBanner(this.run.isBoss ? t('banner.nightDone', { n: this.run.night }) : t('banner.paid'), t('banner.coins', { n: this.earnings.total }));
     this.sfx.tone(COIN_HZ, 0.15, 0.25, 'square');
     this.sfx.tone(COIN_HZ * 1.5, 0.25, 0.2, 'square');
   }
@@ -490,13 +556,16 @@ export class Game {
   private stepPayout() {
     if (this.clock < this.payoutUntil) return;
     this.hud.hideBanner();
-    this.openShop();
+    // Le gobelet du créancier n'a pas de boutique la première nuit.
+    if (this.run.skipsShop) this.leaveShop();
+    else this.openShop();
   }
 
   private openShop() {
     this.phase = 'shop';
     this.ambience.setShop(true);
     this.run.openShop();
+    for (const item of this.run.shop) if (item?.kind === 'relic') this.progress.discover(item.def.id);
     this.bossProps.show(null, this.clock);
     this.fillSuitcase(true);
     this.suitcase.open();
@@ -519,12 +588,16 @@ export class Game {
     const boss = this.run.boss;
     if (!this.run.canPact) {
       // Pas de second pacte la même nuit, ni face au créancier lui-même.
-      if (this.run.pactNight === this.run.night) this.showFlash('Il ne négocie qu’une fois par nuit');
+      if (this.run.pactsSigned >= MAX_PACTS) this.showFlash(t('flash.noMorePacts'));
+      else if (this.run.pactNight === this.run.night) this.showFlash(t('flash.oncePerNight'));
       return this.gameOver();
     }
     const available = this.run.body.available();
     let options: BodyPartId[];
-    if (boss?.pact && boss.pact !== 'mort' && available.includes(boss.pact)) {
+    if (this.run.tutorial) {
+      // Le premier pacte ne laisse pas le choix : un doigt.
+      options = ['doigt'];
+    } else if (boss?.pact && boss.pact !== 'mort' && available.includes(boss.pact)) {
       options = [boss.pact];
     } else {
       const pool = [...available];
@@ -544,14 +617,22 @@ export class Game {
 
   private sign(part: BodyPartId) {
     this.run.signPact(part);
+    if (!this.run.tutorial) this.progress.record({ type: 'pact', part, inRun: this.run.body.pacts });
     this.sfx.toneAt(0, 196, 180, 0.6, 0.2); // le pouce sur le papier
     this.creditor.sneer(1);
     this.pact.play(part, () => this.afterPact(part));
   }
 
   private afterPact(part: BodyPartId) {
+    // Fin du tutoriel : la partie continue telle quelle, avec le doigt en moins et la relique achetée.
+    if (this.run.tutorial) {
+      this.progress.finishTutorial();
+      this.run.endTutorial();
+      this.lastOptions = { cup: 'cuir', stake: 0 };
+      this.progress.record({ type: 'pact', part, inRun: this.run.body.pacts });
+    }
     this.applyBody();
-    this.showFlash(`${BODY_PARTS[part].name} : ${BODY_PARTS[part].effect.toLowerCase()}`);
+    this.showFlash(t('flash.part', { name: partName(part), effect: partEffect(part).toLowerCase() }));
     if (this.heartGiven()) return;
     this.earnings = null;
     this.openShop();
@@ -561,9 +642,10 @@ export class Game {
   private heartGiven() {
     if (!(this.run.lastNight === this.run.night && this.run.isBoss)) return false;
     this.phase = 'over';
+    this.progress.endRun(this.run.cup, this.run.stake, false);
     this.stage.lightLevel.value = 0.3;
     this.fx.dim(0.45);
-    this.hud.showBanner('TON CŒUR S’ARRÊTE', `Il bat encore dans sa main. Nuit ${this.run.night} · R pour une nouvelle run`);
+    this.hud.showBanner(t('banner.heart'), t('banner.heartSub', { n: this.run.night }));
     [0, 1.2, 2.8].forEach((d) => this.sfx.toneAt(d, 58, 36, 0.18, 0.7));
     return true;
   }
@@ -572,18 +654,20 @@ export class Game {
   private applyBody() {
     this.sfx.setDeaf(this.run.body.ear);
     this.fx.eyes(this.run.body.eyes);
+    this.cup.setBlind(this.run.body.blind);
   }
 
   private gameOver() {
     this.phase = 'over';
+    this.progress.endRun(this.run.cup, this.run.stake, false);
     const { night, echeance, score, target } = this.run;
-    const where = `Nuit ${night}, ${echeance === 2 ? 'boss' : `échéance ${echeance + 1}`}`;
+    const where = echeance === 2 ? t('where.boss', { n: night }) : t('where.echeance', { n: night, e: echeance + 1 });
     // Il frappe deux fois. Puis la lumière baisse.
     this.creditor.knock(2, () => {
       if (this.phase !== 'over') return;
       this.stage.lightLevel.value = 0.45;
       this.fx.dim(0.6);
-      this.hud.showBanner('LE CRÉANCIER RÉCLAME SON DÛ', `${where} · ${fmt(score)} / ${fmt(target)} · R pour une nouvelle run`);
+      this.hud.showBanner(t('banner.death'), t('banner.deathSub', { where, score: fmt(score), target: fmt(target) }));
       this.sfx.tone(98, 1.4, 0.35, 'sawtooth');
       this.sfx.tone(92, 1.6, 0.3, 'sawtooth');
     });
@@ -654,7 +738,7 @@ export class Game {
       const index = this.targeting;
       const item = this.run.shop[index];
       if (item?.kind === 'burin') {
-        this.panel.pickFace(this.run.dice[die], FACE_MODS[item.mod].name, (face) => this.complete(index, die, face), () => this.cancelTarget());
+        this.panel.pickFace(this.run.dice[die], modName(item.mod), (face) => this.complete(index, die, face), () => this.cancelTarget());
       } else {
         this.complete(index, die);
       }
@@ -681,7 +765,7 @@ export class Game {
         this.hud.hideTooltip();
         this.suitcase.hover(null);
         this.highlightTargets(true);
-        const what = item.kind === 'die' ? `Clique le dé à remplacer par un ${DIE_TYPES[item.type].name.toLowerCase()}, sur le tapis rouge` : 'Clique le dé à graver, sur le tapis rouge';
+        const what = item.kind === 'die' ? t('shop.askReplace', { die: dieName(item.type).toLowerCase() }) : t('shop.askEngrave');
         this.panel.ask(this.run, what, () => this.cancelTarget());
       } else {
         this.complete(target.index);
@@ -714,10 +798,12 @@ export class Game {
     else to = this.dice[die].mesh.position.clone();
     this.suitcase.flyAway(index, to, () => {
       if (item.kind === 'relic') this.shelf.sync(this.run.relics);
-      else if (item.kind === 'gravure') this.showFlash(`${COMBOS[item.combo].name} monte au niveau ${this.run.levels[item.combo]}`);
+      else if (item.kind === 'gravure') this.showFlash(t('flash.levelUp', { name: comboName(item.combo), n: this.run.levels[item.combo] ?? 1 }));
       else {
         this.syncDice(false);
-        this.dice[die].flash();
+        // Burin : le dé se retourne pour montrer la face qu'on vient de graver.
+        if (item.kind === 'burin' && face >= 0) this.table.turnUp(die, face, () => this.dice[die].flash());
+        else this.dice[die].flash();
       }
     });
     this.refreshShop();
@@ -727,6 +813,7 @@ export class Game {
     this.panel.relicMenu(this.run, index, {
       sell: () => {
         this.run.sell(index);
+        this.progress.record({ type: 'sold' });
         this.sfx.tone(523, 0.12, 0.2);
         this.shelf.sync(this.run.relics);
         this.refreshShop();
@@ -756,7 +843,11 @@ export class Game {
     this.panel.hide();
     this.targeting = null;
     this.earnings = null;
+    const wasBoss = this.run.isBoss;
     this.run.advance();
+    if (wasBoss && !this.run.tutorial) {
+      this.progress.record({ type: 'night', reached: this.run.night, boneOnly: this.run.dice.every((d) => d.type === 'os') });
+    }
     this.ambience.setShop(false);
     this.startEcheance();
     this.sfx.play('wood', 0.7);
@@ -773,12 +864,18 @@ export class Game {
     const boss = this.run.boss;
     this.bossProps.show(boss?.id ?? null, this.clock);
     this.creditor.engrave(fmt(this.run.target));
-    if (boss) this.showFlash(`${boss.name} : ${boss.rule}`);
-    if (this.run.confiscated >= 0) this.showFlash(`Le Boucher confisque ton ${DIE_TYPES[this.run.dice[this.run.confiscated].type].name.toLowerCase()}`);
+    if (boss) this.showFlash(t('flash.boss', { name: bossName(boss), rule: bossRule(boss) }));
+    if (this.run.confiscated >= 0) this.showFlash(t('flash.confiscated', { die: dieName(this.run.dice[this.run.confiscated].type).toLowerCase() }));
   }
 
-  newRun() {
-    this.run = new RunState();
+  /** Lance une run : gobelet, intérêts, reliques débloquées. */
+  startRun(o: RunOptions) {
+    this.lastOptions = o;
+    this.menu.hide();
+    this.cup.mesh.visible = true;
+    document.body.classList.remove('in-intro');
+    this.run = new RunState({ ...o, unlocked: this.progress.unlockedRelics() });
+    this.coinsRecorded = false;
     this.sequence = null;
     this.rollsThisHand = 0;
     this.freeRerollUsed = false;
@@ -787,7 +884,7 @@ export class Game {
     this.revealed = false;
     this.unveiled = false;
     this.flipped = false;
-    this.shelf.sync([]);
+    this.shelf.sync(this.run.relics);
     this.panel.hide();
     this.suitcase.reset();
     this.targeting = null;
@@ -798,6 +895,8 @@ export class Game {
     this.fx.lean(null);
     this.table.reset();
     this.creditor.reset();
+    this.cup.setTint(CUPS.find((c) => c.id === this.run.cup)?.tint ?? 0xffffff);
+    this.lightUp = 1;
     this.stage.lightLevel.value = 1;
     this.fx.dim(1);
     this.applyBody();
@@ -805,10 +904,112 @@ export class Game {
     this.startEcheance();
   }
 
+  /** Le tutoriel muet : noir, l'ampoule s'allume, et le créancier montre tout du doigt. */
+  startTutorial() {
+    this.startRun({ tutorial: true });
+    // Noir complet. Il était déjà là : l'ampoule grésille et le révèle.
+    this.phase = 'intro';
+    this.introAt = this.clock;
+    this.introStage = 0;
+    this.creditor.reset(); // pas de gravure avant qu'il ait posé le gobelet
+    this.creditor.showSmile(false);
+    this.stage.lightLevel.value = 0;
+    this.fx.dim(0, true);
+    this.dice.forEach((d) => d.setActive(false));
+    this.cup.place(INTRO_CUP_FROM);
+    this.cup.mesh.visible = false;
+    document.body.classList.add('in-intro');
+  }
+
+  /** Noir, l'ampoule s'allume, il sort le gobelet de sa manche, le pousse vers toi, frappe la table. */
+  private stepIntro() {
+    const t = this.clock - this.introAt;
+    if (this.introStage === 0 && t > 1.4) {
+      this.introStage = 1;
+      this.creditor.showSmile(true);
+      this.sfx.burst({ type: 'bandpass', freq: 2600, q: 2, duration: 0.05, volume: 0.6 }); // l'interrupteur
+    }
+    if (this.introStage === 1) {
+      // Grésillement de plus en plus stable, puis la lumière tient.
+      const k = (t - 1.4) / 1.4;
+      const on = k >= 1 || Math.sin(t * 41) + Math.sin(t * 17.3) > 1.2 - k * 2.4;
+      const level = on ? 1 : 0.04;
+      this.stage.lightLevel.value = level;
+      this.fx.dim(level, true);
+      if (k >= 1) this.introStage = 2;
+    }
+    if (this.introStage === 2 && t > 3.6) {
+      this.introStage = 3;
+      const upright = new THREE.Quaternion();
+      this.creditor.pullCup(INTRO_CUP_FROM, INTRO_CUP_TO, CUP_INNER_RADIUS + CUP_WALL, (base) => {
+        this.cup.mesh.visible = true;
+        this.cup.drive(base, upright);
+      }, () => {
+        if (this.phase !== 'intro') return;
+        this.sfx.burst({ type: 'lowpass', freq: 420, freqEnd: 180, duration: 1.5, volume: 0.55 }); // le cuir glisse sur le feutre
+        const rest = this.cup.restPose();
+        this.cup.moveTo(rest.position, rest.quaternion, 1.5, () => {
+          if (this.phase !== 'intro') return;
+          this.sfx.play('wood', 0.8);
+          this.creditor.knock(2, () => this.endIntro());
+        }, (k) => 1 - (1 - k) ** 3);
+      });
+    }
+  }
+
+  private endIntro() {
+    if (this.phase !== 'intro') return;
+    document.body.classList.remove('in-intro');
+    this.phase = 'play';
+    this.lastAction = this.clock;
+    this.syncDice(true);
+    this.table.collectDice();
+    this.creditor.engrave(fmt(this.run.target));
+  }
+
+  /** Retour au menu principal. */
+  private openMenu() {
+    this.phase = 'menu';
+    document.body.classList.remove('in-intro');
+    this.hud.hideBanner();
+    this.hud.hideTally();
+    this.panel.hide();
+    this.suitcase.reset();
+    this.pact.reset();
+    this.fx.lean(null);
+    this.stage.lightLevel.value = 1;
+    this.fx.dim(1);
+    this.menu.title();
+  }
+
+  /** Quitter la table en pleine run : elle compte comme perdue. */
+  private quitRun() {
+    if (this.phase !== 'over' && !this.run.tutorial) this.progress.endRun(this.run.cup, this.run.stake, false);
+    this.openMenu();
+  }
+
+  /** Réglages du menu appliqués au jeu : langue, volume, gore. */
+  private applySettings() {
+    const st = this.progress.settings;
+    setLang(st.lang);
+    this.sfx.setVolume(st.volume);
+    this.pact.softGore = st.softGore;
+  }
+
   // ---------------------------------------------------------------- boucle
 
   step(dt: number) {
     this.clock += dt;
+    if (this.lightUp < 1 && this.phase === 'play') {
+      // L'ampoule se rallume en grésillant.
+      this.lightUp = Math.min(1, this.lightUp + dt / 2.5);
+      this.stage.lightLevel.value = this.lightUp * (Math.random() < 0.15 ? 0.3 : 1);
+    }
+    if (!this.coinsRecorded && this.run.coins >= 40 && !this.run.tutorial) {
+      this.coinsRecorded = true;
+      this.progress.record({ type: 'coins', amount: this.run.coins });
+    }
+    if (this.phase === 'intro') this.stepIntro();
     this.table.step(dt);
     this.pact.update(dt);
     if (this.phase === 'scoring') this.stepScoring();
@@ -820,7 +1021,7 @@ export class Game {
     // L'Horloger joue la main à ta place quand le temps est écoulé.
     if (this.deadline !== null && this.phase === 'play' && this.table.idle && this.clock >= this.deadline) {
       this.deadline = null;
-      this.showFlash("L'Horloger a perdu patience");
+      this.showFlash(t('flash.clockmaker'));
       this.validate();
     }
 
@@ -880,11 +1081,14 @@ export class Game {
       coins: this.run.coins,
       combo: this.revealed && !this.hidden() ? this.result : null,
       levels,
-      boss: boss ? { name: boss.name, rule: boss.rule } : null,
+      boss: boss ? { name: bossName(boss), rule: bossRule(boss) } : null,
       body: bodySummary(this.run),
       timer: this.deadline !== null && this.phase === 'play' ? Math.max(0, this.deadline - this.clock) : null,
       curse: this.run.curse,
+      contracts: MAX_PACTS - this.run.pactsSigned,
       canValidate: this.phase === 'play' && this.table.idle && this.rollsThisHand > 0 && this.validateAt === null,
+      // Tutoriel : le bouton de validation pulse dès le premier lancer.
+      pulse: this.run.tutorial && this.phase === 'play' && this.rollsThisHand > 0,
       hint: this.hint(),
     });
   }
@@ -897,21 +1101,24 @@ export class Game {
   private hint() {
     if (this.clock < this.flashUntil) return this.flash;
     switch (this.phase) {
+      case 'menu':
+      case 'intro':
+        return '';
       case 'pact':
-        return this.pact.awaitingSignature ? 'Appose ton pouce sur ce que tu donnes' : '';
+        return this.pact.awaitingSignature ? t('hint.sign') : '';
       case 'scoring':
       case 'payout':
         return '';
       case 'shop':
-        return this.targeting !== null ? 'Clique un de tes dés illuminés sur le tapis rouge · Échap ou un clic dans la valise pour annuler' : '';
+        return this.targeting !== null ? t('hint.pickDie') : '';
       case 'over':
-        return 'R pour une nouvelle run';
+        return t('hint.newRun');
       case 'play':
-        if (this.table.holding) return 'Secoue… puis relâche d’un geste vers la table';
+        if (this.table.holding) return t('hint.shake');
         if (this.table.rolling) return '';
-        if (this.rollsThisHand === 0) return 'Clique et maintiens le gobelet, secoue, puis relâche pour lancer';
-        if (!this.canRoll() || !this.table.hasLooseDice()) return 'Espace pour valider la main';
-        return 'Clique un dé pour le garder · reprends le gobelet pour relancer · Espace pour valider';
+        if (this.rollsThisHand === 0) return t('hint.grab');
+        if (!this.canRoll() || !this.table.hasLooseDice()) return t('hint.validate');
+        return t('hint.keep');
     }
   }
 
@@ -938,7 +1145,7 @@ export class Game {
 }
 
 const COIN_HZ = 880;
-const fmt = (n: number) => Math.floor(n).toLocaleString('fr-FR');
+const fmt = fmtNum;
 
 function effectLabel(e: Effect): [string, string] {
   if (e.xmult !== undefined) return [`×${+e.xmult.toFixed(2)}`, XMULT_COLOR];
@@ -952,12 +1159,12 @@ function effectLabel(e: Effect): [string, string] {
 function bodySummary(run: RunState) {
   const b = run.body;
   const parts: string[] = [];
-  if (b.fingers) parts.push(`${b.fingers} doigt${b.fingers > 1 ? 's' : ''}`);
-  if (b.teeth) parts.push(`${b.teeth} dent${b.teeth > 1 ? 's' : ''}`);
-  if (b.ear) parts.push('oreille');
-  if (b.tongue) parts.push('langue');
-  if (b.eyes) parts.push(b.eyes > 1 ? 'les deux yeux' : 'un œil');
-  if (b.hand) parts.push('main gauche');
-  if (b.heart) parts.push('cœur');
+  if (b.fingers) parts.push(plural(b.fingers, 'body.finger'));
+  if (b.teeth) parts.push(plural(b.teeth, 'body.tooth'));
+  if (b.ear) parts.push(t('body.ear'));
+  if (b.tongue) parts.push(t('body.tongue'));
+  if (b.eyes) parts.push(plural(b.eyes, 'body.eye'));
+  if (b.hand) parts.push(t('body.hand'));
+  if (b.heart) parts.push(t('body.heart'));
   return parts.join(' · ');
 }

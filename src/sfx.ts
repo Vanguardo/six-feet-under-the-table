@@ -32,6 +32,13 @@ export class Sfx {
   private pan: StereoPannerNode | null = null;
   private tinnitus: OscillatorNode | null = null;
   private deaf = false;
+  private volume = 0.8;
+
+  /** Volume général (0 à 1), réglé dans le menu. */
+  setVolume(v: number) {
+    this.volume = v;
+    if (this.master && this.ctx) this.master.gain.setTargetAtTime(0.75 * v, this.ctx.currentTime, 0.05);
+  }
 
   /** Oreille perdue : son étouffé, d'un seul côté, avec un sifflement permanent. */
   setDeaf(on: boolean) {
@@ -126,7 +133,7 @@ export class Sfx {
     }
     this.ctx = new AudioContext();
     this.master = this.ctx.createGain();
-    this.master.gain.value = 0.6;
+    this.master.gain.value = 0.75 * this.volume;
     // Chaîne de l'oreille : un filtre et un panoramique, neutres tant qu'on a ses deux oreilles.
     this.ear = this.ctx.createBiquadFilter();
     this.ear.type = 'lowpass';

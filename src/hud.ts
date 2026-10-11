@@ -1,3 +1,5 @@
+import { fmtNum, getLang, t } from './i18n';
+import { comboName } from './i18n/names';
 import type { ComboResult } from './rules/combos';
 
 export interface HudState {
@@ -19,11 +21,15 @@ export interface HudState {
   timer: number | null;
   /** ×mult de malédiction pour la prochaine main. */
   curse: number;
+  /** Contrats que le créancier accepte encore de signer. */
+  contracts: number;
   canValidate: boolean;
+  /** Le bouton de validation pulse (tutoriel). */
+  pulse?: boolean;
   hint: string;
 }
 
-const fmt = (n: number) => Math.floor(n).toLocaleString('fr-FR');
+const fmt = fmtNum;
 
 /**
  * HUD temporaire du prototype. Dans le jeu final, ces infos vivront sur la table
@@ -45,41 +51,42 @@ export class Hud {
   }
 
   update(s: HudState) {
-    const key = JSON.stringify({ ...s, hint: '', timer: s.timer === null ? null : Math.ceil(s.timer), combo: s.combo && [s.combo.combo.id, s.combo.level, s.combo.score] });
+    const key = JSON.stringify({ ...s, lang: getLang(), hint: '', timer: s.timer === null ? null : Math.ceil(s.timer), combo: s.combo && [s.combo.combo.id, s.combo.level, s.combo.score] });
     if (key !== this.last) {
       this.last = key;
       const combo = s.combo
-        ? `<div class="combo">${s.combo.combo.name}${s.combo.level > 1 ? ` niv. ${s.combo.level}` : ''}</div>
-           <div class="detail">${s.combo.chips} jetons × ${s.combo.mult} (avant reliques)</div>`
+        ? `<div class="combo">${comboName(s.combo.combo.id)}${s.combo.level > 1 ? ` ${t('hud.level', { n: s.combo.level })}` : ''}</div>
+           <div class="detail">${t('hud.preview', { chips: s.combo.chips, mult: s.combo.mult })}</div>`
         : `<div class="detail">—</div>`;
       const levels = s.levels.length ? `<div class="sep"></div>${s.levels.map((l) => `<div class="detail">${l}</div>`).join('')}` : '';
       const boss = s.boss ? `<div class="sep"></div><div class="boss">${s.boss.name}</div><div class="detail">${s.boss.rule}</div>` : '';
-      const timer = s.timer !== null ? `<div class="row warn"><span>DÉCIDE</span><span>${Math.ceil(s.timer)} s</span></div>` : '';
-      const curse = s.curse > 1 ? `<div class="row warn"><span>MALÉDICTION</span><span>×${s.curse.toFixed(2)}</span></div>` : '';
-      const body = s.body ? `<div class="sep"></div><div class="detail warn">Perdu : ${s.body}</div>` : '';
+      const timer = s.timer !== null ? `<div class="row warn"><span>${t('hud.timer')}</span><span>${Math.ceil(s.timer)} s</span></div>` : '';
+      const curse = s.curse > 1 ? `<div class="row warn"><span>${t('hud.curse')}</span><span>×${s.curse.toFixed(2)}</span></div>` : '';
+      const body = s.body ? `<div class="sep"></div><div class="detail warn">${t('hud.lost', { what: s.body })}</div>` : '';
       this.ticket.innerHTML = `
-        <div class="row"><span>NUIT ${s.night}/7</span><span>${s.isBoss ? 'BOSS' : `ÉCHÉANCE ${s.echeance + 1}/3`}</span></div>
+        <div class="row"><span>${t('hud.night', { n: s.night })}</span><span>${s.isBoss ? t('hud.boss') : t('hud.echeance', { n: s.echeance + 1 })}</span></div>
         ${boss}
         <div class="sep"></div>
-        <div class="row"><span>OBJECTIF</span><span>${fmt(s.target)}</span></div>
-        <div class="row"><span>SCORE</span><span>${fmt(s.score)}</span></div>
+        <div class="row"><span>${t('hud.target')}</span><span>${fmt(s.target)}</span></div>
+        <div class="row"><span>${t('hud.score')}</span><span>${fmt(s.score)}</span></div>
         <div class="sep"></div>
-        <div class="row"><span>MAINS</span><span>${s.hands}</span></div>
-        <div class="row"><span>RELANCES</span><span>${s.rerolls}</span></div>
-        <div class="row"><span>PIÈCES</span><span>${s.coins}</span></div>
+        <div class="row"><span>${t('hud.hands')}</span><span>${s.hands}</span></div>
+        <div class="row"><span>${t('hud.rerolls')}</span><span>${s.rerolls}</span></div>
+        <div class="row"><span>${t('hud.coins')}</span><span>${s.coins}</span></div>
+        <div class="row ${s.contracts === 0 ? 'warn' : ''}"><span>${t('hud.contracts')}</span><span>${s.contracts}</span></div>
         ${timer}${curse}
         <div class="sep"></div>
         ${combo}
         ${levels}
         ${body}
-        <button id="validate" ${s.canValidate ? '' : 'disabled'}>VALIDER [ESPACE]</button>`;
+        <button id="validate" class="${s.pulse && s.canValidate ? 'pulse' : ''}" ${s.canValidate ? '' : 'disabled'}>${t('hud.validate')}</button>`;
     }
     this.hint.textContent = s.hint;
   }
 
   /** La combinaison claque au centre de l'écran une fois les dés révélés. */
   popCombo(res: ComboResult) {
-    this.combo.innerHTML = `${res.combo.name}<small>${res.chips} × ${res.mult} = ${res.score}</small>`;
+    this.combo.innerHTML = `${comboName(res.combo.id)}<small>${res.chips} × ${res.mult} = ${fmt(res.score)}</small>`;
     this.combo.classList.remove('pop');
     void this.combo.offsetWidth; // relance l'animation CSS
     this.combo.classList.add('pop');

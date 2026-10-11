@@ -2,8 +2,9 @@ import { HAND_COUNT, REROLL_COUNT } from '../config';
 import { Body } from './body';
 import { BOSS_POOL, BOSSES, type Boss } from './bosses';
 import { COMBOS, type ComboId, type ComboLevels } from './combos';
+import { stakeRules, type CupId, type StakeRule } from './cups';
 import { DIE_TYPES, FACE_MODS, newDie, type DieTypeId, type FaceModId, type OwnedDie } from './dice';
-import { ownRelic, RARITY_WEIGHT, RELICS, sellValue, type OwnedRelic, type RelicDef } from './relics';
+import { findRelic, ownRelic, RARITY_WEIGHT, RELICS, sellValue, type OwnedRelic, type RelicDef } from './relics';
 import { Rng } from './rng';
 
 export const NIGHTS = 7;
@@ -54,6 +55,25 @@ export type ShopItem =
 /** Un article qui demande de choisir un dé (et une face pour un burin). */
 export const needsTarget = (item: ShopItem) => item.kind === 'die' || item.kind === 'burin';
 
+/** Contrats par run : au-delà, une échéance ratée est mortelle. */
+export const MAX_PACTS = 2;
+
+export interface RunOptions {
+  seed?: number;
+  cup?: CupId;
+  /** Niveau d'intérêts (0 à 8). */
+  stake?: number;
+  /** Reliques débloquées : seules elles apparaissent dans la valise. */
+  unlocked?: Set<string>;
+  /** Le doigt perdu au tutoriel manque encore (première run seulement). */
+  missingFinger?: boolean;
+  /** Run scénarisée du tutoriel. */
+  tutorial?: boolean;
+}
+
+/** Objectifs du tutoriel : le premier s'atteint, le second jamais. */
+const TUTORIAL_TARGETS = [60, 999999];
+
 /** État d'une run, sans rendu : nuits, dette, pièces, reliques, dés, corps. */
 export class RunState {
   readonly rng: Rng;
@@ -86,12 +106,52 @@ export class RunState {
   toothDie = false;
   /** Nuit du dernier pacte : le créancier ne négocie qu'une fois par nuit. */
   pactNight = 0;
+  /** Contrats signés pendant la run : le créancier n'en accorde que MAX_PACTS. */
+  pactsSigned = 0;
 
   shop: (ShopItem | null)[] = [];
   rerollCost = REROLL_BASE;
 
-  constructor(seed = Math.floor(Math.random() * 2 ** 31)) {
+  readonly cup: CupId;
+  readonly stake: number;
+  private readonly rules: Set<StakeRule>;
+  private readonly unlocked: Set<string> | null;
+  /** Tutoriel en cours ; il s'arrête au premier pacte et la run continue normalement. */
+  tutorial: boolean;
+  /** Gobelet percé : un dé au hasard tombe de la table à chaque lancer. */
+  readonly leaky: boolean;
+  /** Gobelet doré : chaque nuit coûte plus cher. */
+  private readonly cupDebt: number;
+
+  constructor(o: RunOptions = {}) {
+    const seed = o.seed ?? Math.floor(Math.random() * 2 ** 31);
     this.rng = new Rng(seed);
+    this.cup = o.cup ?? 'cuir';
+    this.stake = o.stake ?? 0;
+    this.rules = stakeRules(this.stake);
+    this.unlocked = o.unlocked ?? null;
+    this.tutorial = !!o.tutorial;
+    this.leaky = this.cup === 'perce';
+    this.cupDebt = this.cup === 'dore' ? 1.15 : 1;
+    switch (this.cup) {
+      case 'boucher':
+        this.body.fingers = 1;
+        this.relics.push(ownRelic(findRelic('moignon')));
+        break;
+      case 'os':
+        this.dice = this.dice.map(() => newDie('ecrase'));
+        break;
+      case 'dore':
+        this.coins += 10;
+        break;
+      case 'perce':
+        this.dice.push(newDie());
+        break;
+      case 'creancier':
+        this.relics.push(ownRelic(findRelic('leContrat')));
+        break;
+    }
+    if (o.missingFinger) this.body.fingers = Math.max(this.body.fingers, 1);
     const pool = [...BOSS_POOL];
     this.bosses = Array.from({ length: NIGHTS }, (_, n) => {
       if (n === NIGHTS - 1) return BOSSES.creancier;
@@ -100,8 +160,34 @@ export class RunState {
     this.startEcheance();
   }
 
+  /**
+   * Fin du tutoriel : la même run continue, avec ce qui a été acheté et le doigt perdu.
+   * Le contrat imposé ne compte pas dans les deux autorisés ; les pièces repartent du départ.
+   */
+  endTutorial() {
+    this.tutorial = false;
+    this.pactsSigned = 0;
+    this.coins = Math.max(this.coins, STARTING_COINS);
+  }
+
   get target() {
-    return Math.round(TARGETS[this.night - 1][this.echeance] * this.debtMultiplier * this.bleed);
+    if (this.tutorial) return TUTORIAL_TARGETS[Math.min(this.echeance, 1)];
+    let debt = this.debtMultiplier * this.bleed * this.cupDebt;
+    if (this.rules.has('debt20')) debt *= 1.2;
+    if (this.rules.has('debt20b')) debt *= 1.2;
+    if (this.rules.has('boss') && this.isBoss) debt *= 1.25;
+    return Math.round(TARGETS[this.night - 1][this.echeance] * debt);
+  }
+
+  /** Mains par échéance (le dernier niveau d'intérêts en retire une ; la fin du tutoriel n'en laisse qu'une). */
+  get handCount() {
+    if (this.tutorial && this.echeance > 0) return 1;
+    return HAND_COUNT - (this.rules.has('lastHand') ? 1 : 0);
+  }
+
+  /** Le gobelet du créancier n'a pas de boutique la première nuit. */
+  get skipsShop() {
+    return this.cup === 'creancier' && this.night === 1;
   }
 
   get isBoss() {
@@ -127,19 +213,19 @@ export class RunState {
 
   /** Relances de l'échéance : chaque doigt perdu en retire une. */
   get maxRerolls() {
-    return Math.max(0, REROLL_COUNT - this.body.fingers - (this.has('coeurDansUnBocal') ? 2 : 0));
+    return Math.max(0, REROLL_COUNT - this.body.fingers - (this.has('coeurDansUnBocal') ? 2 : 0) - (this.rules.has('reroll') ? 1 : 0));
   }
 
   /** Dés lancés cette échéance (indices dans `dice`). */
   activeDice(): number[] {
-    let count = BASE_DICE + (this.has('sixiemeDoigt') ? 1 : 0) - (this.body.hand ? 1 : 0);
+    let count = BASE_DICE + (this.has('sixiemeDoigt') ? 1 : 0) + (this.leaky ? 1 : 0) - (this.body.hand ? 1 : 0);
     count = Math.min(count, this.dice.length);
     return [...Array(count).keys()].filter((i) => i !== this.confiscated);
   }
 
   startEcheance() {
     this.score = 0;
-    this.hands = HAND_COUNT;
+    this.hands = this.handCount;
     this.rerolls = this.maxRerolls;
     this.handsPlayed = 0;
     this.bleed = 1;
@@ -156,8 +242,8 @@ export class RunState {
   /** Gains d'une échéance réussie : récompense, mains non jouées, intérêts, reliques. */
   earnings(): Earnings {
     const echeance = ECHEANCE_REWARD[this.echeance];
-    const hands = this.hands;
-    const interest = Math.min(INTEREST_CAP, Math.floor(this.coins / INTEREST_STEP));
+    const hands = this.rules.has('hands') ? 0 : this.hands;
+    const interest = Math.min(this.rules.has('interest') ? 2 : INTEREST_CAP, Math.floor(this.coins / INTEREST_STEP));
     const relics = this.relics.reduce((sum, r) => sum + (r.def.onEcheanceEnd?.(r.state) ?? 0), 0);
     return { echeance, hands, interest, relics, total: echeance + hands + interest + relics };
   }
@@ -175,7 +261,7 @@ export class RunState {
 
   /** Un pacte est-il encore possible cette nuit ? */
   get canPact() {
-    return this.pactNight !== this.night && this.boss?.pact !== 'mort' && this.body.available().length > 0;
+    return this.pactsSigned < MAX_PACTS && this.pactNight !== this.night && this.boss?.pact !== 'mort' && this.body.available().length > 0;
   }
 
   addBleed(faces: number) {
@@ -188,6 +274,7 @@ export class RunState {
   signPact(part: Parameters<Body['take']>[0]) {
     this.body.take(part);
     this.pactNight = this.night;
+    this.pactsSigned++;
     if (part === 'dent') {
       this.coins += TOOTH_COINS;
       this.toothDie = true;
@@ -201,7 +288,7 @@ export class RunState {
   // ---------------------------------------------------------------- boutique
 
   private price(base: number) {
-    return Math.ceil(base * (this.body.tongue ? TONGUE_TAX : 1));
+    return Math.ceil(base * (this.body.tongue ? TONGUE_TAX : 1)) + (this.rules.has('prices') ? 1 : 0);
   }
 
   openShop() {
@@ -218,11 +305,18 @@ export class RunState {
   }
 
   private rollShop() {
+    // Tutoriel : une seule relique, et juste de quoi la payer.
+    if (this.tutorial) {
+      const def = findRelic('mainCoupee');
+      this.coins = def.price;
+      this.shop = [{ kind: 'relic', def, price: def.price }];
+      return;
+    }
     const relicSlots = this.has('cleRouillee') ? 3 : 2;
     const items: ShopItem[] = [];
     const taken = new Set(this.relics.map((r) => r.def.id));
     for (let i = 0; i < relicSlots; i++) {
-      const pool = RELICS.filter((d) => !taken.has(d.id));
+      const pool = RELICS.filter((d) => !taken.has(d.id) && (!this.unlocked || this.unlocked.has(d.id)));
       if (pool.length === 0) break;
       const def = this.rng.weighted(pool, pool.map((d) => RARITY_WEIGHT[d.rarity]));
       taken.add(def.id);

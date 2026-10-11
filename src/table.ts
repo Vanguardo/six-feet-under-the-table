@@ -263,6 +263,28 @@ export class DiceTable {
     });
   }
 
+  /** Boutique : le dé `i` saute et se retourne pour montrer la face `face` (gravure fraîche). */
+  turnUp(i: number, face: number, onDone?: () => void) {
+    const d = this.dice[i];
+    const home = d.position.clone();
+    const rot = orientationFor(face + 1);
+    d.moveTo(home.clone().setY(home.y + 1.4), rot, 0.3, () => {
+      d.moveTo(home, rot, 0.22, () => {
+        this.sfx.play('wood', 0.6);
+        onDone?.();
+      });
+    });
+  }
+
+  /** Gobelet percé : le dé `i` passe par le trou et quitte la table pour la main. */
+  dropDie(i: number) {
+    const d = this.dice[i];
+    if (!d?.active || d.kept) return;
+    this.effects.dust(d.position, 1);
+    this.sfx.play('wood', 0.6);
+    d.setActive(false);
+  }
+
   /** Dé sous le pointeur parmi ceux posés sur le tapis (boutique). */
   pickDie(): number {
     const shown = this.dice.filter((d) => d.active);
@@ -274,8 +296,10 @@ export class DiceTable {
   hop() {
     for (const d of this.dice) {
       if (!d.active || d.kept || d.tween) continue;
-      d.body.setLinvel({ x: rand(-1.5, 1.5), y: rand(5, 8), z: rand(-1.5, 1.5) }, true);
-      d.body.setAngvel(this.randomSpin(rand(4, 9)), true);
+      // Le poing fait à peine frémir le plomb.
+      const k = d.heavy ? 0.3 : 1;
+      d.body.setLinvel({ x: rand(-1.5, 1.5) * k, y: rand(5, 8) * k, z: rand(-1.5, 1.5) * k }, true);
+      d.body.setAngvel(this.randomSpin(rand(4, 9) * k), true);
     }
   }
 
@@ -371,15 +395,17 @@ export class DiceTable {
     const speed = Math.hypot(v.x, v.y);
     for (const d of this.dice) {
       if (d.kept) continue;
+      // Le plomb part comme une pierre : moins loin, moins haut, presque sans rotation.
+      const k = d.heavy ? 0.6 : 1;
       d.body.setLinvel(
         {
-          x: clamp(v.x * 0.45, -9, 9) + rand(-1, 1),
-          y: clamp(2 + v.y * 0.15, 0, 8) + rand(0, 1),
-          z: -clamp(8 + speed * 0.3, 8, 22) + rand(-1, 1),
+          x: (clamp(v.x * 0.45, -9, 9) + rand(-1, 1)) * k,
+          y: (clamp(2 + v.y * 0.15, 0, 8) + rand(0, 1)) * k,
+          z: (-clamp(8 + speed * 0.3, 8, 22) + rand(-1, 1)) * k,
         },
         true,
       );
-      d.body.setAngvel(this.randomSpin(rand(18, 32)), true);
+      d.body.setAngvel(this.randomSpin(d.heavy ? rand(6, 10) : rand(18, 32)), true);
       d.stillTime = 0;
     }
   }

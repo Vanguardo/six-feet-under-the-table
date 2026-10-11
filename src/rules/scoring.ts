@@ -10,7 +10,7 @@ export interface ScoreStep {
   effect: Effect;
   chips: number;
   mult: number;
-  /** Texte court pour l'animation, quand l'étape n'est pas un simple nombre. */
+  /** Clé du texte court affiché par l'animation (`step.<label>`), quand l'étape n'est pas un simple nombre. */
   label?: string;
 }
 
@@ -67,7 +67,7 @@ export function scoreHand(faces: Face[], result: ComboResult, relics: OwnedRelic
     steps.push({ kind, effect, chips, mult, ...extra });
   };
 
-  if (o.curse > 1) apply('curse', { xmult: o.curse }, { label: 'Malédiction' });
+  if (o.curse > 1) apply('curse', { xmult: o.curse }, { label: 'curse' });
 
   const active = relics.map((r, i) => (o.disabledRelics.has(i) ? null : r));
 
@@ -124,8 +124,8 @@ export function scoreHand(faces: Face[], result: ComboResult, relics: OwnedRelic
   });
 
   const PAIRS = ['paire', 'doublePaire'];
-  if (o.onlyPairs && !PAIRS.includes(result.combo.id)) apply('boss', { xmult: 0 }, { label: 'Refusé' });
-  if (o.halved) apply('boss', { xmult: 0.5 }, { label: 'Déjà vu' });
+  if (o.onlyPairs && !PAIRS.includes(result.combo.id)) apply('boss', { xmult: 0 }, { label: 'refused' });
+  if (o.halved) apply('boss', { xmult: 0.5 }, { label: 'seen' });
 
   return { steps, chips, mult, total: Math.floor(chips * mult), coins, bled, glassUsed };
 }

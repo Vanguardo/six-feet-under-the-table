@@ -1,6 +1,8 @@
-import { COMBOS, comboStats, LEVEL_GAIN } from './rules/combos';
-import { DIE_TYPES, FACE_MODS, type OwnedDie } from './rules/dice';
-import { RARITY_LABEL, sellValue } from './rules/relics';
+import { t } from './i18n';
+import { comboName, dieDesc, dieName, modDesc, modName, rarityName, relicDesc, relicName } from './i18n/names';
+import { comboStats, LEVEL_GAIN, type ComboId } from './rules/combos';
+import { DIE_TYPES, type OwnedDie } from './rules/dice';
+import { sellValue } from './rules/relics';
 import { MAX_RELICS, type Earnings, type RunState, type ShopItem } from './rules/run';
 
 /**
@@ -30,44 +32,46 @@ export class ShopPanel {
     this.root.classList.add('show');
   }
 
+  private head(run: RunState, title = t('shop.title')) {
+    return `<div class="head"><span>${title}</span><span class="coins">${t('shop.coins', { n: run.coins })}</span></div>`;
+  }
+
   /** Bandeau par défaut : pièces, gains de l'échéance, consignes. */
   bar(run: RunState, earnings: Earnings | null, message?: string) {
     const earn = earnings
-      ? `Gains : +${earnings.echeance} échéance${earnings.hands ? ` · +${earnings.hands} mains` : ''}${earnings.interest ? ` · +${earnings.interest} intérêts` : ''}${earnings.relics ? ` · +${earnings.relics} reliques` : ''}`
-      : 'Pacte signé : aucun gain.';
-    this.show(`
-      <div class="head"><span>LA VALISE</span><span class="coins">${run.coins} pièces</span></div>
+      ? t('shop.earnings', { e: earnings.echeance }) +
+        (earnings.hands ? t('shop.earnHands', { n: earnings.hands }) : '') +
+        (earnings.interest ? t('shop.earnInterest', { n: earnings.interest }) : '') +
+        (earnings.relics ? t('shop.earnRelics', { n: earnings.relics }) : '')
+      : t('shop.noEarnings');
+    this.show(`${this.head(run)}
       <div class="earn">${earn}</div>
-      <div class="sub">${
-        message ??
-        `Clique un objet pour l'acheter · la sonnette relance la valise · clique une relique du rebord pour la vendre ou la déplacer (${run.relics.length}/${MAX_RELICS}) · referme le couvercle pour continuer`
-      }</div>`);
+      <div class="sub">${message ?? t('shop.help', { n: run.relics.length, max: MAX_RELICS })}</div>`);
   }
 
-  /** Consigne pendant le choix d'un dé, avec un bouton pour annoncer. */
+  /** Consigne pendant le choix d'un dé, avec un bouton pour annuler. */
   ask(run: RunState, message: string, onCancel: () => void) {
     this.show(
-      `<div class="head"><span>LA VALISE</span><span class="coins">${run.coins} pièces</span></div>
+      `${this.head(run)}
        <div class="sub">${message}</div>
-       <div class="actions"><button data-action="cancel">Annuler</button><span></span></div>`,
+       <div class="actions"><button data-action="cancel">${t('shop.cancel')}</button><span></span></div>`,
       { cancel: onCancel },
     );
   }
 
   /** Choix de la face à graver ; une gravure existante est remplacée. */
-  pickFace(die: OwnedDie, modName: string, onPick: (face: number) => void, onCancel: () => void) {
-    const type = DIE_TYPES[die.type];
-    const faces = type.faces
+  pickFace(die: OwnedDie, mod: string, onPick: (face: number) => void, onCancel: () => void) {
+    const faces = DIE_TYPES[die.type].faces
       .map((v, f) => {
-        const mod = die.mods[f];
-        return `<button class="face ${mod ?? ''}" data-action="face" data-index="${f}">${mod === 'vide' ? 0 : v}${mod ? `<small>${FACE_MODS[mod].name}</small>` : ''}</button>`;
+        const m = die.mods[f];
+        return `<button class="face ${m ?? ''}" data-action="face" data-index="${f}">${m === 'vide' ? 0 : v}${m ? `<small>${modName(m)}</small>` : ''}</button>`;
       })
       .join('');
     this.show(
-      `<div class="head"><span>${type.name}</span><span></span></div>
-       <div class="sub">Quelle face graver (${modName.toLowerCase()}) ? Une gravure existante est remplacée.</div>
+      `<div class="head"><span>${dieName(die.type)}</span><span></span></div>
+       <div class="sub">${t('shop.pickFace', { mod: mod.toLowerCase() })}</div>
        <div class="faces">${faces}</div>
-       <div class="actions"><button data-action="cancel">Annuler</button><span></span></div>`,
+       <div class="actions"><button data-action="cancel">${t('shop.cancel')}</button><span></span></div>`,
       { face: onPick, cancel: onCancel },
     );
   }
@@ -76,17 +80,17 @@ export class ShopPanel {
   relicMenu(run: RunState, index: number, on: { sell: () => void; move: (delta: number) => void; close: () => void }) {
     const r = run.relics[index];
     const sell = run.canSell(index)
-      ? `<button data-action="sell">Vendre ${sellValue(r.def, run.has('couteauABeurre'))} $</button>`
-      : '<button disabled>Maudite : invendable</button>';
+      ? `<button data-action="sell">${t('shop.sell', { n: sellValue(r.def, run.has('couteauABeurre')) })}</button>`
+      : `<button disabled>${t('shop.cursed')}</button>`;
     this.show(
-      `<div class="head"><span>${r.def.name}</span><span class="rarity ${r.def.rarity}">${RARITY_LABEL[r.def.rarity]}</span></div>
-       <div class="sub">${r.def.description}${r.def.status ? ` · <b>${r.def.status(r.state)}</b>` : ''}</div>
+      `<div class="head"><span>${relicName(r.def)}</span><span class="rarity ${r.def.rarity}">${rarityName(r.def.rarity)}</span></div>
+       <div class="sub">${relicDesc(r.def)}${r.def.status ? ` · <b>${r.def.status(r.state)}</b>` : ''}</div>
        <div class="actions">
          <span>
-           <button data-action="left" ${index === 0 ? 'disabled' : ''}>◀ Avant</button>
-           <button data-action="right" ${index === run.relics.length - 1 ? 'disabled' : ''}>Après ▶</button>
+           <button data-action="left" ${index === 0 ? 'disabled' : ''}>${t('shop.before')}</button>
+           <button data-action="right" ${index === run.relics.length - 1 ? 'disabled' : ''}>${t('shop.after')}</button>
          </span>
-         <span>${sell} <button data-action="close">Fermer</button></span>
+         <span>${sell} <button data-action="close">${t('shop.close')}</button></span>
        </div>`,
       { sell: on.sell, left: () => on.move(-1), right: () => on.move(1), close: on.close },
     );
@@ -97,25 +101,26 @@ export class ShopPanel {
 export function itemTooltip(item: ShopItem): string {
   switch (item.kind) {
     case 'relic':
-      return `<b>${item.def.name}</b> · ${RARITY_LABEL[item.def.rarity]}<br>${item.def.description}<br><b>${item.price} $</b>`;
+      return `<b>${relicName(item.def)}</b> · ${rarityName(item.def.rarity)}<br>${relicDesc(item.def)}<br><b>${item.price} $</b>`;
     case 'gravure': {
       const gain = LEVEL_GAIN[item.combo];
-      return `<b>Gravure : ${COMBOS[item.combo].name}</b><br>+${gain.chips} jetons et +${gain.mult} mult<br><b>${item.price} $</b>`;
+      return t('tip.gravure', { name: comboName(item.combo), chips: gain.chips, mult: gain.mult, price: item.price });
     }
-    case 'die': {
-      const t = DIE_TYPES[item.type];
-      return `<b>${t.name}</b> · faces ${t.faces.join(' ')}<br>${t.description}<br>Remplace un de tes dés.<br><b>${item.price ? `${item.price} $` : 'offert'}</b>`;
-    }
-    case 'burin': {
-      const m = FACE_MODS[item.mod];
-      return `<b>Burin : ${m.name}</b><br>${m.description}<br>Grave une face d'un de tes dés.<br><b>${item.price} $</b>`;
-    }
+    case 'die':
+      return t('tip.die', {
+        name: dieName(item.type),
+        faces: DIE_TYPES[item.type].faces.join(' '),
+        desc: dieDesc(item.type),
+        price: item.price ? `${item.price} $` : t('shop.free'),
+      });
+    case 'burin':
+      return t('tip.burin', { name: modName(item.mod), desc: modDesc(item.mod), price: item.price });
   }
 }
 
 /** Ligne de niveau affichée dans le ticket. */
-export function levelLine(run: RunState, id: keyof typeof COMBOS) {
+export function levelLine(run: RunState, id: ComboId) {
   const level = run.effectiveLevels()[id] ?? 1;
   const s = comboStats(id, level);
-  return `${COMBOS[id].name} niv. ${level} : ${s.chips} × ${s.mult}`;
+  return t('hud.levelLine', { name: comboName(id), n: level, chips: s.chips, mult: s.mult });
 }

@@ -219,6 +219,8 @@ export class Die {
 
   /** Dé en jeu cette échéance (sinon rangé hors de la table : main perdue, Boucher…). */
   active = true;
+  /** Dé en plomb : lancé moins loin, tourne moins, s'écrase au lieu de rouler. */
+  heavy = false;
   private lookKey = '';
 
   /** Habille le dé : matière, valeurs et gravures de ses faces, faces cachées ou non. */
@@ -244,8 +246,15 @@ export class Die {
 
   private setPhysics(type: DieType) {
     const lead = type.id === 'plomb';
-    this.collider.setDensity(lead ? 3 : 1);
-    this.collider.setRestitution(lead ? 0.08 : 0.3);
+    this.heavy = lead;
+    // Le plomb ne rebondit pas, accroche le feutre et s'arrête vite : il roule à peine.
+    this.collider.setDensity(lead ? 6 : 1);
+    this.collider.setRestitution(lead ? 0 : 0.3);
+    this.collider.setRestitutionCombineRule(lead ? RAPIER.CoefficientCombineRule.Min : RAPIER.CoefficientCombineRule.Average);
+    this.collider.setFriction(lead ? 0.95 : 0.45);
+    this.collider.setFrictionCombineRule(lead ? RAPIER.CoefficientCombineRule.Max : RAPIER.CoefficientCombineRule.Average);
+    this.body.setLinearDamping(lead ? 0.7 : 0.05);
+    this.body.setAngularDamping(lead ? 3 : 0.25);
     // Dé pipé : du plomb coulé côté opposé à la face favorite, qui sort donc plus souvent.
     const favorite = FACE_NORMALS[FACE_VALUES.indexOf(PIPE_FAVORITE_FACE + 1)];
     const com = type.id === 'pipe' ? favorite.clone().multiplyScalar(-0.3) : new THREE.Vector3();

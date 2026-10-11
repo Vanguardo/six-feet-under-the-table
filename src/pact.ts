@@ -1,10 +1,12 @@
 import * as THREE from 'three';
 import type { Creditor } from './creditor/creditor';
 import { PAPER_DEPTH } from './creditor/creditor';
-import { Hand } from './creditor/hand';
+import { JarShelf } from './jarShelf';
 import { ps1ify } from './render/ps1';
 import { grimeTexture, skinTexture } from './render/textures';
-import { BODY_PARTS, type BodyPartId } from './rules/body';
+import { t } from './i18n';
+import { partEffect, partName } from './i18n/names';
+import type { BodyPartId } from './rules/body';
 import type { Sfx } from './sfx';
 
 /** Effets d'image que la mise en scène déclenche. */
@@ -115,9 +117,9 @@ class ContractPaper {
     g.fillStyle = '#1a0e08';
     g.textAlign = 'center';
     g.font = 'bold 44px "Courier New", monospace';
-    g.fillText('C O N T R A T', CW / 2, 56);
+    g.fillText(t('contract.title'), CW / 2, 56);
     g.font = '18px "Courier New", monospace';
-    g.fillText("L'échéance est payée. En contrepartie, le débiteur cède :", CW / 2, 92);
+    g.fillText(t('contract.terms'), CW / 2, 92);
 
     this.zones.forEach((z, i) => {
       if (z.part === 'refus') {
@@ -126,7 +128,7 @@ class ContractPaper {
         g.strokeRect(z.x, z.y, z.w, z.h);
         g.fillStyle = i === this.hovered ? '#8a1010' : '#5a3a1e';
         g.font = 'bold 20px "Courier New", monospace';
-        g.fillText('Refuser', z.x + z.w / 2, z.y + 28);
+        g.fillText(t('contract.refuse'), z.x + z.w / 2, z.y + 28);
         return;
       }
       // Cadre pointillé ; la zone survolée se teinte de rouge.
@@ -148,14 +150,14 @@ class ContractPaper {
       g.restore();
       g.fillStyle = '#1a0e08';
       g.font = 'bold 20px "Courier New", monospace';
-      g.fillText(BODY_PARTS[z.part].name, z.x + z.w / 2, z.y + 150);
+      g.fillText(partName(z.part), z.x + z.w / 2, z.y + 150);
       g.font = '15px "Courier New", monospace';
-      wrap(g, BODY_PARTS[z.part].effect, z.x + z.w / 2, z.y + 176, z.w - 16, 18);
+      wrap(g, partEffect(z.part), z.x + z.w / 2, z.y + 176, z.w - 16, 18);
     });
 
     g.fillStyle = '#3a2a1a';
     g.font = 'italic 16px "Courier New", monospace';
-    g.fillText('Appose ton pouce sur ce que tu donnes.', CW / 2 - 60, CH - 34);
+    g.fillText(t('contract.sign'), CW / 2 - 60, CH - 34);
     if (this.stamp) drawThumbprint(g, this.stamp.x + this.stamp.w / 2, this.stamp.y + 70);
     this.texture.needsUpdate = true;
   }
@@ -326,11 +328,13 @@ export class PactScene {
   private readonly bloodScreen = document.getElementById('bloodscreen')!;
   private timeline: Timed[] = [];
   private clock = 0;
-  private readonly jars = new Map<BodyPartId, THREE.Group>();
+  /** Les bocaux, sur l'étagère à gauche. */
+  readonly shelf: JarShelf;
   private readonly stains: THREE.Mesh[] = [];
-  private readonly trophies: THREE.Object3D[] = [];
   private paper: ContractPaper | null = null;
   private readonly thumb: PlayerThumb;
+  /** Gore atténué (réglage) : pas de sang à l'écran ni sur la table, pas d'éclair rouge. */
+  softGore = false;
   /** Le contrat est posé devant le joueur et attend une signature. */
   private waiting: { onSign: (part: BodyPartId) => void; onRefuse: () => void } | null = null;
 
@@ -341,6 +345,7 @@ export class PactScene {
     private readonly creditor: Creditor,
   ) {
     this.thumb = new PlayerThumb(scene);
+    this.shelf = new JarShelf(scene);
   }
 
   get busy() {
@@ -428,17 +433,19 @@ export class PactScene {
       this.fx.tear(1);
       this.fx.aberration(0.014);
       this.fx.jolt(1.3);
-      this.blackout.classList.add('red');
+      if (!this.softGore) this.blackout.classList.add('red');
     });
     this.at(cut + 0.12, () => this.blackout.classList.remove('red'));
     this.at(cut + 0.3, () => this.scream(part));
     this.at(cut + 2.0, () => {
       this.addTrophy(part);
-      this.addStain();
       this.blackout.classList.remove('show');
-      this.bloodScreen.classList.remove('show');
-      void this.bloodScreen.offsetWidth;
-      this.bloodScreen.classList.add('show');
+      if (!this.softGore) {
+        this.addStain();
+        this.bloodScreen.classList.remove('show');
+        void this.bloodScreen.offsetWidth;
+        this.bloodScreen.classList.add('show');
+      }
       this.breathing();
     });
     this.at(cut + 2.8, onDone);
@@ -452,6 +459,7 @@ export class PactScene {
   update(dt: number) {
     this.clock += dt;
     this.thumb.update(dt);
+    this.shelf.update(dt);
     while (this.timeline.length > 0 && this.clock >= this.timeline[0].at) this.timeline.shift()!.fn();
   }
 
@@ -515,76 +523,8 @@ export class PactScene {
 
   // ---------------------------------------------------------------- bocaux et sang
 
-  private jar(part: BodyPartId): THREE.Group {
-    const existing = this.jars.get(part);
-    if (existing) return existing;
-    const order: BodyPartId[] = ['doigt', 'dent', 'oreille', 'langue', 'oeil', 'coeur'];
-    const g = new THREE.Group();
-    g.position.set(-6 - order.indexOf(part) * 1.05, 0.8, -10.6);
-    const glass = new THREE.MeshStandardMaterial({ color: 0xb8c8b0, transparent: true, opacity: 0.22, roughness: 0.1, depthWrite: false });
-    const liquid = new THREE.MeshStandardMaterial({ color: 0x8a9a40, transparent: true, opacity: 0.35, emissive: 0x1a2008, depthWrite: false });
-    const lid = new THREE.MeshStandardMaterial({ color: 0x3a3428, metalness: 0.6, roughness: 0.6 });
-    const add = (geo: THREE.BufferGeometry, mat: THREE.Material, y: number) => {
-      const m = new THREE.Mesh(geo, mat);
-      m.position.y = y;
-      g.add(m);
-    };
-    add(new THREE.CylinderGeometry(0.42, 0.42, 1.1, 10, 1, true), glass, 0.55);
-    add(new THREE.CylinderGeometry(0.38, 0.38, 0.8, 10), liquid, 0.42);
-    add(new THREE.CylinderGeometry(0.45, 0.45, 0.12, 10), lid, 1.14);
-    ps1ify(g);
-    this.scene.add(g);
-    this.trophies.push(g);
-    this.jars.set(part, g);
-    return g;
-  }
-
   private addTrophy(part: BodyPartId) {
-    if (part === 'main') {
-      // La main est trop grande pour un bocal : elle est posée à côté, paume en l'air.
-      const hand = new Hand(true);
-      hand.root.scale.setScalar(0.42);
-      hand.root.position.set(-4.6, 0.95, -11);
-      hand.root.rotation.set(0, 0.6, Math.PI);
-      hand.curl.fill(0.55);
-      hand.pose();
-      ps1ify(hand.root);
-      this.scene.add(hand.root);
-      this.trophies.push(hand.root);
-      return;
-    }
-    const jar = this.jar(part);
-    const skin = new THREE.MeshStandardMaterial({ map: skinTexture(), roughness: 0.7, flatShading: true });
-    let piece: THREE.Mesh;
-    switch (part) {
-      case 'doigt':
-        piece = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.07, 0.42, 5), skin);
-        break;
-      case 'dent':
-        piece = new THREE.Mesh(new THREE.ConeGeometry(0.07, 0.2, 5), new THREE.MeshStandardMaterial({ color: 0xe8e0c8 }));
-        break;
-      case 'oreille':
-        piece = new THREE.Mesh(new THREE.TorusGeometry(0.15, 0.05, 4, 8, Math.PI * 1.5), skin);
-        break;
-      case 'langue':
-        piece = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.06, 0.38), new THREE.MeshStandardMaterial({ color: 0x8a2a2a, roughness: 0.4 }));
-        break;
-      case 'oeil': {
-        piece = new THREE.Mesh(new THREE.SphereGeometry(0.15, 8, 6), new THREE.MeshStandardMaterial({ color: 0xe8e0d0, roughness: 0.3 }));
-        const iris = new THREE.Mesh(new THREE.CircleGeometry(0.07, 8), new THREE.MeshBasicMaterial({ color: 0x2a3a2a }));
-        iris.position.z = 0.151;
-        piece.add(iris);
-        break;
-      }
-      default:
-        piece = new THREE.Mesh(new THREE.SphereGeometry(0.24, 7, 6), new THREE.MeshStandardMaterial({ color: 0x6a0a0a, roughness: 0.35 }));
-    }
-    // Chaque morceau flotte à sa place dans le bocal, légèrement de travers.
-    const n = jar.children.length - 3;
-    piece.position.set(Math.cos(n * 2.4) * 0.18, 0.25 + (n % 4) * 0.13, Math.sin(n * 2.4) * 0.18);
-    piece.rotation.set(Math.random() * 3, Math.random() * 3, Math.random() * 3);
-    ps1ify(piece);
-    jar.add(piece);
+    this.shelf.add(part);
   }
 
   /** Une flaque de sang sur le feutre, côté joueur. Elle reste jusqu'à la fin de la run. */
@@ -618,10 +558,9 @@ export class PactScene {
 
   /** Nouvelle run : bocaux vidés, feutre nettoyé. */
   reset() {
-    for (const o of [...this.trophies, ...this.stains]) this.scene.remove(o);
-    this.trophies.length = 0;
+    for (const o of this.stains) this.scene.remove(o);
     this.stains.length = 0;
-    this.jars.clear();
+    this.shelf.reset();
     this.timeline = [];
     this.removePaper();
     this.blackout.classList.remove('show', 'red');

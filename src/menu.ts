@@ -1,0 +1,261 @@
+import { getLang, setLang, t, type Lang } from './i18n';
+import { relicDesc, relicName, rarityName } from './i18n/names';
+import { cupCatalog, relicCatalog, type Progress } from './progress';
+import type { BodyPartId } from './rules/body';
+import { MAX_STAKE, type CupId } from './rules/cups';
+import { RELICS } from './rules/relics';
+
+export interface MenuActions {
+  play(cup: CupId, stake: number): void;
+  tutorial(): void;
+  /** Les réglages ont changé (langue, volume, gore). */
+  settings(): void;
+}
+
+const PARTS: BodyPartId[] = ['doigt', 'dent', 'oreille', 'langue', 'oeil', 'main', 'coeur'];
+
+/**
+ * Menus en HTML par-dessus la scène : la table reste visible derrière, dans la pénombre.
+ * Avertissement de contenu, titre, gobelets, collection, registre, réglages, pause.
+ */
+export class Menu {
+  private readonly root = document.getElementById('menu')!;
+  private readonly toastEl = document.getElementById('toast')!;
+  private handlers: Record<string, (arg: string) => void> = {};
+  private cup: CupId = 'cuir';
+  private stake = 0;
+  private toastTimer = 0;
+
+  constructor(
+    private readonly progress: Progress,
+    private readonly actions: MenuActions,
+  ) {
+    this.root.addEventListener('click', (e) => {
+      const el = (e.target as HTMLElement).closest<HTMLElement>('[data-action]');
+      if (!el || (el as HTMLButtonElement).disabled) return;
+      this.handlers[el.dataset.action!]?.(el.dataset.arg ?? '');
+    });
+    this.root.addEventListener('input', (e) => {
+      const el = e.target as HTMLInputElement;
+      if (el.dataset.action === 'volume') {
+        this.progress.updateSettings({ volume: Number(el.value) / 100 });
+        this.actions.settings();
+      }
+    });
+  }
+
+  get open() {
+    return this.root.classList.contains('show');
+  }
+
+  hide() {
+    this.root.classList.remove('show');
+    document.body.classList.remove('in-menu');
+  }
+
+  private show(html: string, handlers: Record<string, (arg: string) => void>) {
+    this.root.innerHTML = `<div class="panel">${html}</div>`;
+    this.handlers = handlers;
+    this.root.classList.add('show');
+    document.body.classList.add('in-menu');
+  }
+
+  private langSwitch() {
+    const l = getLang();
+    return `<div class="langs">
+      <button data-action="lang" data-arg="en" class="${l === 'en' ? 'on' : ''}">English</button>
+      <button data-action="lang" data-arg="fr" class="${l === 'fr' ? 'on' : ''}">Français</button>
+    </div>`;
+  }
+
+  private setLangAnd(rerender: () => void) {
+    return (arg: string) => {
+      setLang(arg as Lang);
+      this.progress.updateSettings({ lang: arg as Lang });
+      this.actions.settings();
+      rerender();
+    };
+  }
+
+  // ---------------------------------------------------------------- écrans
+
+  /** Avertissement de contenu, au lancement. Le clic débloque aussi le son. */
+  warning(onAccept: () => void) {
+    this.show(
+      `<div class="warning">
+        <div class="tag">${t('menu.warningTitle')}</div>
+        <p>${t('menu.warningText')}</p>
+        <p class="small">${t('menu.warningSoft')}</p>
+        ${this.langSwitch()}
+        <button class="primary" data-action="accept">${t('menu.accept')}</button>
+      </div>`,
+      { accept: () => onAccept(), lang: this.setLangAnd(() => this.warning(onAccept)) },
+    );
+  }
+
+  title() {
+    this.show(
+      `<h1>SIX FEET<br>UNDER THE TABLE</h1>
+       <div class="subtitle">${t('menu.subtitle')}</div>
+       <div class="buttons">
+         <button class="primary" data-action="play">${t('menu.play')}</button>
+         <button data-action="collection">${t('menu.collection')}</button>
+         <button data-action="registry">${t('menu.registry')}</button>
+         <button data-action="settings">${t('menu.settings')}</button>
+       </div>
+       <div class="small">${t('menu.demo')}</div>`,
+      {
+        play: () => (this.progress.tutorialDone ? this.cups() : this.actions.tutorial()),
+        collection: () => this.collection(),
+        registry: () => this.registry(),
+        settings: () => this.settings(() => this.title()),
+      },
+    );
+  }
+
+  /** Choix du gobelet de départ et du niveau d'intérêts. */
+  private cups() {
+    const cards = cupCatalog(this.progress)
+      .map(({ cup, unlocked, unlock }) => {
+        const selected = cup.id === this.cup ? 'selected' : '';
+        return unlocked
+          ? `<button class="cup ${selected}" data-action="cup" data-arg="${cup.id}">
+              <span class="swatch" style="background:#${cup.tint.toString(16).padStart(6, '0')}"></span>
+              <b>${t(`cup.${cup.id}.name`)}</b><span>${t(`cup.${cup.id}.desc`)}</span></button>`
+          : `<button class="cup locked" disabled><b>${t('menu.locked')}</b><span>${unlock ? t(unlock.hint) : ''}</span></button>`;
+      })
+      .join('');
+    const max = this.progress.maxStake(this.cup);
+    this.stake = Math.min(this.stake, max);
+    const stakes = Array.from({ length: MAX_STAKE + 1 }, (_, n) =>
+      n <= max
+        ? `<button class="stake ${n === this.stake ? 'on' : ''}" data-action="stake" data-arg="${n}">${n}</button>`
+        : `<button class="stake" disabled>${n}</button>`,
+    ).join('');
+    const rules = Array.from({ length: this.stake }, (_, k) => `<li>${t(`stake.${k + 1}`)}</li>`).join('');
+    this.show(
+      `<h2>${t('menu.chooseCup')}</h2>
+       <div class="cups">${cards}</div>
+       <h3>${t('menu.interest')}</h3>
+       <div class="stakes">${stakes}</div>
+       <ul class="rules">${rules || `<li>${t('menu.noInterest')}</li>`}</ul>
+       <div class="row">
+         <button data-action="back">${t('menu.back')}</button>
+         <button data-action="tutorial">${t('menu.tutorial')}</button>
+         <button class="primary" data-action="start">${t('menu.start')}</button>
+       </div>`,
+      {
+        cup: (id) => {
+          this.cup = id as CupId;
+          this.cups();
+        },
+        stake: (n) => {
+          this.stake = Number(n);
+          this.cups();
+        },
+        back: () => this.title(),
+        tutorial: () => this.actions.tutorial(),
+        start: () => this.actions.play(this.cup, this.stake),
+      },
+    );
+  }
+
+  /** L'étagère : chaque relique découverte dans son bocal étiqueté. */
+  private collection() {
+    const catalog = relicCatalog(this.progress);
+    const found = catalog.filter((c) => c.seen).length;
+    const cards = catalog
+      .map(({ def, unlocked, seen, unlock }) => {
+        if (!unlocked) return `<div class="relic locked"><b>${t('menu.locked')}</b><span>${unlock ? t(unlock.hint) : ''}</span></div>`;
+        if (!seen) return `<div class="relic unseen"><b>???</b><span>${t('menu.notSeen')}</span></div>`;
+        return `<div class="relic ${def.rarity}"><b>${relicName(def)}</b><i>${rarityName(def.rarity)}</i><span>${relicDesc(def)}</span></div>`;
+      })
+      .join('');
+    this.show(
+      `<h2>${t('menu.collection')} · ${found}/${RELICS.length}</h2>
+       <div class="relics">${cards}</div>
+       <div class="row"><button data-action="back">${t('menu.back')}</button></div>`,
+      { back: () => this.title() },
+    );
+  }
+
+  /** Le registre du créancier : tout ce qu'il t'a pris, toutes runs confondues. */
+  private registry() {
+    const s = this.progress.stats;
+    const parts = PARTS.map((p) => `<div class="line"><span>${t(`ledger.${p}`)}</span><b>${s.taken[p]}</b></div>`).join('');
+    this.show(
+      `<h2>${t('menu.registry')}</h2>
+       <div class="registry">
+         <div class="col">${parts}</div>
+         <div class="col">
+           <div class="line"><span>${t('stats.runs')}</span><b>${s.runs}</b></div>
+           <div class="line"><span>${t('stats.wins')}</span><b>${s.wins}</b></div>
+           <div class="line"><span>${t('stats.bestNight')}</span><b>${s.bestNight}</b></div>
+           <div class="line"><span>${t('stats.hands')}</span><b>${s.hands}</b></div>
+           <div class="line"><span>${t('stats.bosses')}</span><b>${s.bossesBeaten}</b></div>
+           <div class="line"><span>${t('stats.pacts')}</span><b>${s.pacts}</b></div>
+         </div>
+       </div>
+       <div class="row"><button data-action="back">${t('menu.back')}</button></div>`,
+      { back: () => this.title() },
+    );
+  }
+
+  /** Réglages ; `back` dit où revenir (titre ou pause). */
+  settings(back: () => void) {
+    const st = this.progress.settings;
+    this.show(
+      `<h2>${t('menu.settings')}</h2>
+       <div class="setting"><span>${t('menu.language')}</span>${this.langSwitch()}</div>
+       <div class="setting"><span>${t('menu.volume')}</span><input type="range" min="0" max="100" value="${Math.round(st.volume * 100)}" data-action="volume"></div>
+       <div class="setting"><span>${t('menu.softGore')}<small>${t('menu.softGoreHint')}</small></span>
+         <button data-action="gore" class="${st.softGore ? 'on' : ''}">${st.softGore ? t('menu.on') : t('menu.off')}</button></div>
+       <div class="setting"><span>${t('menu.fullscreen')}</span><button data-action="fullscreen">${t('menu.toggle')}</button></div>
+       <div class="setting"><span>${t('menu.reset')}<small>${t('menu.resetHint')}</small></span><button data-action="reset">${t('menu.resetButton')}</button></div>
+       <div class="row"><button data-action="back">${t('menu.back')}</button></div>`,
+      {
+        lang: this.setLangAnd(() => this.settings(back)),
+        gore: () => {
+          this.progress.updateSettings({ softGore: !st.softGore });
+          this.actions.settings();
+          this.settings(back);
+        },
+        fullscreen: () => {
+          if (document.fullscreenElement) void document.exitFullscreen();
+          else void document.documentElement.requestFullscreen?.();
+        },
+        reset: () => {
+          if (!window.confirm(t('menu.resetConfirm'))) return;
+          this.progress.wipe();
+          this.settings(back);
+        },
+        back,
+      },
+    );
+  }
+
+  /** Pause pendant une run (Échap). */
+  pause(onResume: () => void, onQuit: () => void) {
+    this.show(
+      `<h2>${t('menu.pause')}</h2>
+       <div class="buttons">
+         <button class="primary" data-action="resume">${t('menu.resume')}</button>
+         <button data-action="settings">${t('menu.settings')}</button>
+         <button data-action="quit">${t('menu.quit')}</button>
+       </div>`,
+      {
+        resume: () => onResume(),
+        settings: () => this.settings(() => this.pause(onResume, onQuit)),
+        quit: () => onQuit(),
+      },
+    );
+  }
+
+  /** Petite notification (déblocages). */
+  toast(text: string) {
+    this.toastEl.innerHTML = text;
+    this.toastEl.classList.add('show');
+    window.clearTimeout(this.toastTimer);
+    this.toastTimer = window.setTimeout(() => this.toastEl.classList.remove('show'), 3500);
+  }
+}

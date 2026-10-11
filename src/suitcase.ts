@@ -4,7 +4,8 @@ import { displayDie } from './dice';
 import { ps1ify } from './render/ps1';
 import { feltTexture, grimeTexture, leatherTexture, repeated } from './render/textures';
 import { buildRelicMesh } from './relicShelf';
-import { COMBOS } from './rules/combos';
+import { t } from './i18n';
+import { comboName } from './i18n/names';
 import { DIE_TYPES, FACE_MODS } from './rules/dice';
 import type { ShopItem } from './rules/run';
 import type { Sfx } from './sfx';
@@ -69,7 +70,7 @@ function gravurePlate(name: string): THREE.Object3D {
   g.textAlign = 'center';
   g.fillText(name.toUpperCase(), 64, 38);
   g.font = 'bold 18px "Courier New", monospace';
-  g.fillText('+1 NIV.', 64, 62);
+  g.fillText(t('shop.plateLevel'), 64, 62);
   const tex = new THREE.CanvasTexture(canvas);
   tex.colorSpace = THREE.SRGBColorSpace;
   const bronze = new THREE.MeshStandardMaterial({ color: 0x8a6a30, metalness: 0.75, roughness: 0.45, map: grimeTexture() });
@@ -115,7 +116,7 @@ function itemMesh(item: ShopItem): THREE.Object3D {
       return g;
     }
     case 'gravure': {
-      const o = gravurePlate(COMBOS[item.combo].name);
+      const o = gravurePlate(comboName(item.combo));
       o.userData.baseScale = 1.3;
       return o;
     }
@@ -234,7 +235,7 @@ export class Suitcase {
       const home = new THREE.Vector3(-(CASE.w - 1.4) / 2 + spacing * (i + 0.5), ITEM_Y, -0.3);
       object.position.copy(home);
       object.userData.slot = i;
-      const tag = priceTag(item.price === 0 ? 'offert' : `${item.price} $`, affordable(i));
+      const tag = priceTag(item.price === 0 ? t('shop.free') : `${item.price} $`, affordable(i));
       tag.position.set(home.x, CASE.h + 0.3, 1.9);
       this.root.add(object, tag);
       return { object, tag, home, fly: null, bornAt: this.clock };
@@ -251,7 +252,7 @@ export class Suitcase {
       const item = items[i];
       if (!s || s.fly || !item) return;
       this.root.remove(s.tag);
-      s.tag = priceTag(item.price === 0 ? 'offert' : `${item.price} $`, affordable(i));
+      s.tag = priceTag(item.price === 0 ? t('shop.free') : `${item.price} $`, affordable(i));
       s.tag.position.set(s.home.x, CASE.h + 0.3, 1.9);
       this.root.add(s.tag);
     });

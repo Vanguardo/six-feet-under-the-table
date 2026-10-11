@@ -152,8 +152,9 @@ export class PostFx {
   }
 
   /** Luminosité globale : baisse à la mort. */
-  setDim(value: number) {
+  setDim(value: number, instant = false) {
     this.dimTarget = value;
+    if (instant) this.crt.uniforms.uDim.value = value;
   }
 
   render(time: number, dt: number) {

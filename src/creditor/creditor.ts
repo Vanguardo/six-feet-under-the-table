@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { CUP_HEIGHT } from '../config';
 import { repeated, woodTexture } from '../render/textures';
 import { Hand, HAND_REACH } from './hand';
 import { Smile, SMILE_Y } from './smile';
@@ -424,6 +425,76 @@ export class Creditor {
       events: [],
       onEnd: onDone,
     });
+  }
+
+  /**
+   * Intro du tutoriel : la main droite recule dans l'ombre de sa manche, en revient avec
+   * le gobelet et le pousse sur le feutre. `onMove` reçoit la base du gobelet tant qu'il le tient ;
+   * `onRelease` est appelé au moment où il le lâche, lancé vers le joueur.
+   */
+  pullCup(from: THREE.Vector3, to: THREE.Vector3, cupRadius: number, onMove: (base: THREE.Vector3) => void, onRelease: () => void) {
+    // La main tient le gobelet par le rebord, par-dessus : les doigts pendent sur le cuir, côté joueur.
+    const behind = (base: THREE.Vector3) => new THREE.Vector3(base.x + 0.4, base.y + CUP_HEIGHT + 2.3, base.z - cupRadius * 0.9);
+    this.play({
+      duration: 3.2,
+      stiffness: 10,
+      apply: (t, _l, r) => {
+        const back = ease(Math.min(1, t / 0.3));
+        const drag = ease(THREE.MathUtils.clamp((t - 0.42) / 0.5, 0, 1));
+        const base = from.clone().lerp(to, drag);
+        // Le gobelet glisse sur la planche, franchit le rail et se pose sur le feutre.
+        base.y = Math.max(0, Math.min(PLANK_Y, PLANK_Y - (base.z + 7) * 0.9));
+        // Le gobelet n'apparaît qu'une fois dans sa main, tiré de l'ombre de la manche.
+        if (t >= 0.36) onMove(base);
+        const grip = behind(base);
+        r.position.lerp(grip, t < 0.3 ? back : 1);
+        r.yaw = 0;
+        const close = THREE.MathUtils.clamp((t - 0.3) / 0.12, 0, 1);
+        r.pitch = THREE.MathUtils.lerp(0.2, 0.95, close);
+        // Les doigts s'ouvrent dans l'ombre, puis se referment sur le cuir.
+        r.curl = [0, 0, 0, 0, 0.2].map((open, i) => THREE.MathUtils.lerp(open, [0.55, 0.6, 0.65, 0.7, 0.45][i], close));
+        // Petite poussée finale : la main suit le gobelet un instant avant de le lâcher.
+        if (t > 0.92) r.position.z += (t - 0.92) * 12;
+      },
+      events: [{ at: 0.95, fn: onRelease }],
+    });
+  }
+
+  /**
+   * Tutoriel : l'index tendu vient tapoter chaque dé désigné, deux fois.
+   * C'est sa seule façon d'expliquer : « garde ceux-là ».
+   */
+  point(targets: THREE.Vector3[]) {
+    if (targets.length === 0) return;
+    const per = 1.1;
+    const duration = per * targets.length + 0.6;
+    this.play({
+      duration,
+      stiffness: 9,
+      apply: (t, _l, r) => {
+        const time = t * duration;
+        const i = Math.min(targets.length - 1, Math.floor(time / per));
+        const local = time - i * per;
+        const away = ease(Math.min(1, Math.max(0, (time - per * targets.length) / 0.6)));
+        // Deux petits coups d'ongle sur le dé.
+        const tap = local > 0.35 && local < 0.95 ? Math.abs(Math.sin((local - 0.35) * Math.PI * 3.3)) * 0.35 : 0.35;
+        const target = targets[i];
+        const hover = new THREE.Vector3(target.x + 0.56, target.y + 3.25 + tap, target.z - 1.8);
+        r.position.lerp(hover, 1 - away);
+        r.yaw = 0;
+        r.pitch = 1.05 * (1 - away);
+        r.curl = [0.02, 0.95, 0.95, 0.95, 0.7].map((c, k) => THREE.MathUtils.lerp(r.curl[k], c, 1 - away));
+        if (local > 0.4 && local < 0.42) this.fx.tap();
+        if (local > 0.72 && local < 0.74) this.fx.tap();
+      },
+      events: [],
+    });
+  }
+
+  /** Le sourire n'apparaît qu'à la première échéance payée du tutoriel. */
+  showSmile(on: boolean) {
+    this.smile.setVisible(on);
+    if (on) this.smile.widen(0.9, this.clock, 3);
   }
 
   /** Victoire : le sourire disparaît, les mains reculent dans le noir. */

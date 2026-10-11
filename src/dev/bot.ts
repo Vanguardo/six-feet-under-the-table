@@ -74,8 +74,8 @@ export function createBot(game: any, simulate: Sim, renderOnce: () => void) {
     for (let t = 0; t < 4 && game.phase === 'shop'; t += 0.1) simulate(0.1);
   }
 
-  function run(maxMs = 15000) {
-    game.newRun();
+  function run(maxMs = 15000, options: Record<string, unknown> = {}) {
+    game.startRun(options);
     simulate(1);
     const pacts: string[] = [];
     const t0 = performance.now();

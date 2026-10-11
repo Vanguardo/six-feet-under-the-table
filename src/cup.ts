@@ -138,6 +138,13 @@ export class Cup {
     this.setLid(false);
   }
 
+  /** Pose le gobelet debout à `pos`, sans animation (intro du tutoriel). */
+  place(pos: THREE.Vector3) {
+    this.tween = null;
+    this.body.setTranslation(pos, true);
+    this.body.setRotation(new THREE.Quaternion(), true);
+  }
+
   /** Position monde de l'emplacement n° `i` à l'intérieur du gobelet. */
   slotWorld(i: number): THREE.Vector3 {
     return SLOTS[i % SLOTS.length].clone().applyQuaternion(this.quaternion).add(this.position);
@@ -172,6 +179,19 @@ export class Cup {
     }
   }
 
+  private blind = false;
+
+  /** Teinte du cuir selon le gobelet de départ choisi. */
+  setTint(color: number) {
+    this.materials[0].color.setHex(color);
+  }
+
+  /** Plus d'yeux : le gobelet reste dessiné d'un trait blanc, pour savoir ce qu'on fait. */
+  setBlind(on: boolean) {
+    this.blind = on;
+    this.outlineMaterial.color.setHex(on ? 0xffffff : 0xffcc33);
+  }
+
   /** Le gobelet attend d'être pris : contour jaune qui pulse. */
   setPrompt(on: boolean) {
     this.promptTarget = on ? 1 : 0;
@@ -179,8 +199,10 @@ export class Cup {
 
   updatePrompt(dt: number, clock: number) {
     this.prompt += (this.promptTarget - this.prompt) * (1 - Math.exp(-dt * 8));
-    this.outline.visible = this.prompt > 0.01;
-    this.outlineMaterial.opacity = this.prompt * (0.55 + 0.45 * Math.sin(clock * 4));
+    const pulse = this.prompt * (0.55 + 0.45 * Math.sin(clock * 4));
+    // À l'aveugle, le trait blanc reste toujours visible.
+    this.outlineMaterial.opacity = this.blind ? Math.max(0.85, pulse) : pulse;
+    this.outline.visible = this.blind || this.prompt > 0.01;
   }
 
   setHighlight(on: boolean) {

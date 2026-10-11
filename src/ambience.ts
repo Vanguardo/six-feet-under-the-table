@@ -1,8 +1,11 @@
 import type { Sfx } from './sfx';
 
+// Nappe musicale : à peine audible en jeu, un peu plus présente dans la boutique.
+const PAD_IN_GAME = 0.012;
+
 /**
- * Fond sonore : bourdonnement de l'ampoule, ventilation lointaine, gouttes qui résonnent.
- * Pas de musique en jeu, sauf une nappe lo-fi dans la boutique.
+ * Fond sonore : bourdonnement de l'ampoule, ventilation lointaine, gouttes qui résonnent,
+ * et une nappe lo-fi très discrète.
  */
 export class Ambience {
   private started = false;
@@ -65,7 +68,7 @@ export class Ambience {
 
     // Nappe de la boutique : accord mineur désaccordé, coupé tant qu'on joue.
     this.pad = ctx.createGain();
-    this.pad.gain.value = 0;
+    this.pad.gain.value = PAD_IN_GAME;
     const padLp = ctx.createBiquadFilter();
     padLp.type = 'lowpass';
     padLp.frequency.value = 700;
@@ -96,7 +99,8 @@ export class Ambience {
   setShop(on: boolean) {
     const ctx = this.sfx.context;
     if (!this.pad || !ctx) return;
-    this.pad.gain.setTargetAtTime(on ? 0.05 : 0, ctx.currentTime, 0.6);
+    // En jeu, la nappe reste à peine audible ; elle monte un peu dans la boutique.
+    this.pad.gain.setTargetAtTime(on ? 0.05 : PAD_IN_GAME, ctx.currentTime, 0.6);
   }
 
   update(dt: number) {

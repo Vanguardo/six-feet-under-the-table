@@ -1,3 +1,4 @@
+import { t } from '../i18n';
 import type { Body } from './body';
 import type { ComboId, ComboResult } from './combos';
 import type { Face } from './dice';
@@ -95,7 +96,7 @@ export const RELICS: RelicDef[] = [
     afterHand: (s) => {
       s.chips = Math.max(0, s.chips - 3);
     },
-    status: (s) => `+${s.chips} jetons`,
+    status: (s) => t('status.chips', { n: s.chips }),
   },
   {
     id: 'ticketFroisse',
@@ -144,7 +145,7 @@ export const RELICS: RelicDef[] = [
     description: '+1 mult définitif chaque fois qu’une relance n’améliore pas la combinaison',
     initialState: () => ({ mult: 0 }),
     onHand: (_, s) => (s.mult > 0 ? { mult: s.mult } : null),
-    status: (s) => `+${s.mult} mult`,
+    status: (s) => t('status.mult', { n: s.mult }),
   },
   // ---------------------------------------------------------------- peu communes
   {

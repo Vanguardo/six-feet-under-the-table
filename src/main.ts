@@ -4,6 +4,8 @@ import { Cup } from './cup';
 import { Die } from './dice';
 import { Game } from './game';
 import { Hud } from './hud';
+import { setLang } from './i18n';
+import { Progress } from './progress';
 import { CameraRig } from './render/cameraRig';
 import { PostFx } from './render/post';
 import { ps1ify, setSnapResolution } from './render/ps1';
@@ -11,6 +13,10 @@ import { animateBulb, createStage, LOOK_AT } from './scene';
 import { Sfx } from './sfx';
 
 await RAPIER.init();
+
+// Sauvegarde et langue avant tout affichage.
+const progress = new Progress();
+setLang(progress.settings.lang);
 
 const world = new RAPIER.World({ x: 0, y: GRAVITY, z: 0 });
 world.timestep = PHYSICS_DT;
@@ -34,11 +40,11 @@ game = new Game(stage, cup, dice, new Sfx(), hud, {
   jolt: (a) => rig.jolt(a),
   tear: (a) => post.tear(a),
   aberration: (a) => post.kickAberration(a),
-  dim: (v) => post.setDim(v),
+  dim: (v, instant) => post.setDim(v, instant),
   pressure: (p) => post.setPressure(p),
   eyes: (n) => post.setEyes(n),
   lean: (p) => rig.leanOver(p),
-});
+}, progress);
 
 function stepPhysics() {
   game!.step(PHYSICS_DT);
