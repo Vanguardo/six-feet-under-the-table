@@ -18,7 +18,7 @@ function textTexture(text: string, color: string) {
   const height = 64;
   const canvas = document.createElement('canvas');
   const g = canvas.getContext('2d')!;
-  const font = '50px "IM Fell English SC", Georgia, serif';
+  const font = '48px "Special Elite", "Courier New", monospace';
   g.font = font;
   canvas.width = Math.ceil(g.measureText(text).width + 24);
   canvas.height = height;

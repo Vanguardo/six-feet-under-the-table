@@ -9,16 +9,25 @@ export class CameraRig {
   private lean = 0;
   private leanTarget = 0;
   private leanSpeed = 2.5;
+  /** Coup de zoom bref (degrés de champ en moins), qui revient tout seul. */
+  private fovKick = 0;
+  private readonly baseFov: number;
   private readonly leanPosition = new THREE.Vector3();
   private readonly leanLook = new THREE.Vector3();
 
   constructor(private readonly camera: THREE.PerspectiveCamera, target: THREE.Vector3) {
     this.base = camera.position.clone();
+    this.baseFov = camera.fov;
     this.target = target.clone();
   }
 
   /** Débogage : fige la caméra (gros plans). */
   frozen = false;
+
+  /** Coup de zoom : négatif = le regard se resserre d'un coup (un lancer, un coup dur). */
+  kick(degrees: number) {
+    this.fovKick = degrees;
+  }
 
   /** Sursaut : `amount` ≈ 1 pour une frappe sur la table. */
   jolt(amount: number) {
@@ -41,6 +50,12 @@ export class CameraRig {
   update(time: number, dt: number) {
     if (this.frozen) return;
     this.shake = Math.max(0, this.shake - dt * 2.2);
+    if (this.fovKick !== 0 || this.camera.fov !== this.baseFov) {
+      this.fovKick *= Math.exp(-dt * 7);
+      if (Math.abs(this.fovKick) < 0.01) this.fovKick = 0;
+      this.camera.fov = this.baseFov + this.fovKick;
+      this.camera.updateProjectionMatrix();
+    }
     this.lean += (this.leanTarget - this.lean) * (1 - Math.exp(-dt * this.leanSpeed));
     const k = this.lean * this.lean * (3 - 2 * this.lean);
     const breath = Math.sin(time * 1.4) * 0.06;

@@ -107,7 +107,15 @@ export function createStage(container: HTMLElement, world: RAPIER.World): Stage 
     new THREE.SpriteMaterial({ map: glowTexture(), color: 0xffd8a0, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }),
   );
   halo.scale.setScalar(3.6);
+  halo.name = 'halo';
   bulbMesh.add(halo);
+  // Reflet anamorphique : un trait de lumière qui barre l'image à hauteur de l'ampoule.
+  const streak = new THREE.Sprite(
+    new THREE.SpriteMaterial({ map: glowTexture(), color: 0xffc890, transparent: true, opacity: 0.4, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }),
+  );
+  streak.scale.set(14, 0.32, 1);
+  streak.name = 'streak';
+  bulbMesh.add(streak);
   // Réflecteur émaillé au-dessus de l'ampoule : la lumière part vers la table, le plafond reste noir.
   const enamel = new THREE.MeshStandardMaterial({ color: 0x2a3a30, map: grimeTexture(), metalness: 0.4, roughness: 0.55, side: THREE.DoubleSide });
   const reflector = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 1.25, 0.42, 18, 1, true), enamel);
@@ -390,8 +398,10 @@ export function animateBulb(stage: Stage, time: number): boolean {
   const cone = stage.lightCone.material as THREE.ShaderMaterial;
   cone.uniforms.uOpacity.value = LIGHT_CONE_OPACITY * level;
   cone.uniforms.uTime.value = time;
-  const halo = stage.bulbMesh.children.find((c) => (c as THREE.Sprite).isSprite) as THREE.Sprite | undefined;
+  const halo = stage.bulbMesh.getObjectByName('halo') as THREE.Sprite | undefined;
   if (halo) halo.material.opacity = 0.15 + 0.85 * level;
+  const streak = stage.bulbMesh.getObjectByName('streak') as THREE.Sprite | undefined;
+  if (streak) streak.material.opacity = 0.4 * level * (0.9 + Math.sin(time * 3.1) * 0.1);
 
   const pos = stage.dust.geometry.getAttribute('position') as THREE.BufferAttribute;
   for (let i = 0; i < pos.count; i++) {

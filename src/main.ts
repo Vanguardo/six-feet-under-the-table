@@ -56,6 +56,8 @@ game = new Game(stage, cup, dice, new Sfx(), hud, {
   pressure: (p) => post.setPressure(p),
   eyes: (n) => post.setEyes(n),
   lean: (p, from, speed) => rig.leanOver(p, from, speed),
+  kick: (d) => rig.kick(d),
+  pulse: (a) => post.pulse(a),
 }, progress, world);
 loading?.remove();
 

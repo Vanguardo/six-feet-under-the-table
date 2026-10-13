@@ -17,6 +17,7 @@ const CrtShader = {
     uDim: { value: 1 },
     uEyes: { value: 0 },
     uGrade: { value: 1 },
+    uPulse: { value: 0 },
   },
   vertexShader: /* glsl */ `
     varying vec2 vUv;
@@ -35,6 +36,7 @@ const CrtShader = {
     uniform float uDim;
     uniform float uEyes;
     uniform float uGrade;
+    uniform float uPulse;
     varying vec2 vUv;
 
     float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
@@ -98,6 +100,10 @@ const CrtShader = {
       // Vignette ovale, plus marquée dans les coins.
       vec2 v = c * vec2(0.92, 1.08);
       col *= smoothstep(1.42, 0.3, length(v));
+      // Battement de cœur : les bords rougissent et se resserrent à chaque pulsation.
+      float rim = smoothstep(0.2, 1.1, length(v));
+      col *= mix(vec3(1.0), vec3(1.6, 0.32, 0.28), uPulse * rim);
+      col *= 1.0 - uPulse * rim * 0.4;
       col *= uDim;
 
       // Un œil en moins : la moitié gauche du monde disparaît, bord flou et irrégulier.
@@ -157,6 +163,13 @@ export class PostFx {
     this.pressure = THREE.MathUtils.clamp(p, 0, 1);
   }
 
+  private pulseKick = 0;
+
+  /** Une pulsation de sang sur les bords de l'image (le cœur qui cogne). */
+  pulse(amount: number) {
+    this.pulseKick = Math.max(this.pulseKick, amount);
+  }
+
   kickAberration(amount: number) {
     this.aberrationKick = Math.max(this.aberrationKick, amount);
   }
@@ -182,6 +195,8 @@ export class PostFx {
     const u = this.crt.uniforms;
     this.aberrationKick = Math.max(0, this.aberrationKick - dt * 0.012);
     this.tearKick = Math.max(0, this.tearKick - dt * 2.5);
+    this.pulseKick = Math.max(0, this.pulseKick - dt * 2.2);
+    u.uPulse.value = this.pulseKick;
     u.uTime.value = time;
     u.uGrain.value = THREE.MathUtils.lerp(u.uGrain.value, 0.12 + this.pressure * 0.55, 0.05);
     u.uAberration.value = 0.0012 + this.pressure * 0.0018 + this.aberrationKick;

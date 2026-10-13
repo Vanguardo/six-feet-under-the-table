@@ -12,6 +12,7 @@ import { bossName, bossRule, comboName, dieDesc, dieName, modDesc, modName, part
 import { Menu, type RunSummary } from './menu';
 import { MousePrompt } from './mousePrompt';
 import { PlayerHands } from './playerHands';
+import { Glints } from './render/glints';
 import { Printer } from './printer';
 import { CoinShower } from './coinShower';
 import { VialRack } from './vialRack';
@@ -39,6 +40,17 @@ import { CUP_INNER_RADIUS, CUP_WALL } from './config';
 
 /** Vitesse du gobelet au lâcher au-delà de laquelle un lancer compte comme violent. */
 const VIOLENT_THROW = 25;
+
+/** Poids d'une combinaison pour la mise en scène (0 = rien, 1 = le Cinq). */
+const COMBO_WEIGHT: Partial<Record<ComboId, number>> = {
+  cinq: 1,
+  carre: 0.75,
+  grandeSuite: 0.65,
+  full: 0.55,
+  petiteSuite: 0.35,
+  brelan: 0.3,
+  doublePaire: 0.15,
+};
 
 const ROMAN = ['', 'I', 'II', 'III', 'IV', 'V', 'VI', 'VII'];
 
@@ -76,6 +88,10 @@ export interface Fx {
   pressure(level: number): void;
   eyes(lost: number): void;
   lean(point: THREE.Vector3 | null, from?: THREE.Vector3, speed?: number): void;
+  /** Coup de zoom bref (degrés). */
+  kick(degrees: number): void;
+  /** Pulsation rouge sur les bords de l'image. */
+  pulse(amount: number): void;
 }
 
 interface Sequence {
@@ -99,6 +115,7 @@ export class Game {
   private introAt = 0;
   private introStage = 0;
   private pactSkippable = false;
+  private nextBeat = 0;
   /** Ralenti : jusqu'à quand (en temps réel) et à quelle vitesse. */
   private slowUntil = 0;
   private slowScale = 1;
@@ -122,6 +139,8 @@ export class Game {
   private readonly floats: FloatTexts;
   private readonly suitcase: Suitcase;
   private readonly mousePrompt: MousePrompt;
+  private readonly glints: Glints;
+  private nextCoinGlint = 0;
   private readonly cigSmoke: Particles;
   private readonly cigTip = new THREE.Vector3(-6.0, 1.12, -9.3);
   private nextPuff = 0;
@@ -193,6 +212,7 @@ export class Game {
     this.cigSmoke = new Particles(stage.scene, { max: 160, life: [3.5, 5.5], size: [0.25, 3.2], alpha: 0.1, gravity: 0.55, drag: 0.6, softness: 1 });
     this.buildAshtray(stage.scene);
     this.chips = new Particles(stage.scene, { max: 360, life: [0.7, 1.4], size: [0.16, 0.1], alpha: 0.95, gravity: -16, drag: 0.8, softness: 0.25 });
+    this.glints = new Glints(stage.scene);
     this.table = new DiceTable(
       stage,
       cup,
@@ -206,11 +226,14 @@ export class Game {
         onSettled: () => this.onSettled(),
         onRevealed: () => {
           this.revealed = true;
-          if (this.result && !this.hidden()) this.hud.popCombo(this.result);
+          if (this.result && !this.hidden()) {
+            this.hud.popCombo(this.result);
+            this.comboImpact(this.result.combo.id);
+          }
           if (this.run.bossIs('horloger')) this.deadline = this.clock + CLOCKMAKER_SECONDS;
         },
       },
-      { dust: (at, amount) => this.dust(at, amount) },
+      { dust: (at, amount) => this.dust(at, amount), glint: (at) => this.glints.spawn(at) },
     );
     this.shelf = new RelicShelf(stage.scene);
     this.floats = new FloatTexts(stage.scene);
@@ -465,6 +488,8 @@ export class Game {
 
   private onRollStart() {
     this.lastAction = this.clock;
+    this.fx.kick(-2.2);
+    this.fx.jolt(0.12);
     this.deadline = null;
     this.rollsThisHand++;
     if (this.rollsThisHand > 1) {
@@ -961,6 +986,19 @@ export class Game {
     glow.position.copy(this.cigTip);
     for (const m of [tray, ash, paper]) m.castShadow = m.receiveShadow = true;
     scene.add(tray, ash, paper, ember, glow);
+  }
+
+  /** Une combinaison qui tombe : la caméra encaisse selon son rang, les grosses font vaciller l'ampoule. */
+  private comboImpact(id: ComboId) {
+    const weight = COMBO_WEIGHT[id] ?? 0;
+    if (weight <= 0) return;
+    this.fx.jolt(weight * 0.55);
+    this.fx.kick(-weight * 3);
+    this.fx.aberration(weight * 0.004);
+    if (weight >= 0.6) {
+      this.stage.flare.value = Math.max(this.stage.flare.value, weight * 0.8);
+      this.sfx.toneAt(0, 90, 50, 0.5, 0.3 * weight);
+    }
   }
 
   /** Vitesse du temps de jeu : 1 en temps normal, moins pendant un ralenti. */
@@ -1545,6 +1583,17 @@ export class Game {
       this.progress.record({ type: 'coins', amount: this.run.coins });
     }
     if (this.phase === 'intro') this.stepIntro();
+    if (this.table.holding) this.fx.jolt(Math.min(0.07, this.table.holdSpeed * 0.0028));
+    // Dernière main et la dette n'est pas payée : un cœur qui cogne, les bords de l'image qui rougissent.
+    if (this.phase === 'play' && this.run.hands === 1 && this.run.score < this.run.target && !this.run.tutorial) {
+      if (this.clock >= this.nextBeat) {
+        const behind = 1 - this.run.score / this.run.target;
+        this.nextBeat = this.clock + 1.05 - behind * 0.3;
+        this.sfx.toneAt(0, 62, 38, 0.13, 0.55);
+        this.sfx.toneAt(0.2, 58, 36, 0.11, 0.4);
+        this.fx.pulse(0.35 + behind * 0.45);
+      }
+    }
     while (this.timers.length > 0 && this.clock >= this.timers[0].at) this.timers.shift()!.fn();
     this.table.step(dt);
     this.pact.update(dt);
@@ -1603,6 +1652,13 @@ export class Game {
       });
     }
     this.cigSmoke.update(dt);
+    this.glints.update(dt);
+    // De temps en temps, l'or de tes piles accroche la lumière.
+    if (this.clock >= this.nextCoinGlint && this.run.coins > 0) {
+      this.nextCoinGlint = this.clock + 1.5 + Math.random() * 3;
+      const i = Math.floor(Math.random() * Math.min(60, this.run.coins - this.coinsPending));
+      if (i >= 0) this.glints.spawn(this.printer.coinWorld(i).add(new THREE.Vector3(0, 0.12, 0)), 0.7, 0.5);
+    }
     this.chips.update(dt);
     this.ambience.update(dt);
     this.fx.pressure(this.pressure());

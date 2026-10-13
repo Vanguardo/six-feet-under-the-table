@@ -38,6 +38,8 @@ const REVEAL_BASE_HZ = 392;
 export interface TableEffects {
   /** Poussière soulevée du feutre ; `amount` ≈ 1 pour un impact franc. */
   dust(at: THREE.Vector3, amount: number): void;
+  /** Éclat sur une arête qui accroche la lumière. */
+  glint?(at: THREE.Vector3): void;
 }
 
 /** Ce que la run autorise ou doit savoir : la table ne connaît pas les règles de score. */
@@ -82,6 +84,11 @@ export class DiceTable {
   /** Main gauche perdue : le gobelet tremble dans une seule main. */
   tremble = 0;
   private autoShake = -1;
+  /** Vitesse du gobelet tenu, pour faire vibrer la caméra pendant la secousse. */
+  get holdSpeed() {
+    return this.phase === 'holding' ? this.cupVelocity.length() : 0;
+  }
+
   /** Vitesse du gobelet au lâcher du dernier lancer (Gobelet fêlé). */
   lastThrowSpeed = 0;
 
@@ -204,7 +211,10 @@ export class DiceTable {
       const slot = [0, 1, 2, 3, 4, 5].find((s) => !used.has(s))!;
       die.kept = true;
       die.slot = slot;
-      die.moveTo(this.slotPosition(slot), orientationFor(value), 0.3);
+      die.moveTo(this.slotPosition(slot), orientationFor(value), 0.3, () => {
+        this.sfx.play('felt', 0.5);
+        this.effects.dust(die.position.clone().setY(0.1), 0.25);
+      });
     } else {
       const x = this.slotPosition(die.slot).x;
       die.kept = false;
@@ -530,6 +540,7 @@ export class DiceTable {
       if (!data.hidden) {
         this.labels[die].show(value, scoring, this.clock);
         this.dice[die].flash();
+        if (scoring) this.effects.glint?.(this.dice[die].position.clone().add(new THREE.Vector3(0.3, 0.55, 0.3)));
       }
       // La note dépend de la valeur, toujours : on apprend chaque face avant de perdre ses yeux.
       const semis = value * 2;

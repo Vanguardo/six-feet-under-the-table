@@ -11,7 +11,8 @@ function digitTexture(value: number, scoring: boolean): THREE.Texture {
   canvas.width = canvas.height = size;
   const g = canvas.getContext('2d')!;
   // Chiffre gravé à l'ancienne : contour d'encre, dorure qui luit si le dé marque.
-  g.font = '104px "IM Fell English SC", Georgia, serif';
+  // Chiffres de machine à écrire : un 1 ne doit jamais ressembler à un I.
+  g.font = '96px "Special Elite", "Courier New", monospace';
   g.textAlign = 'center';
   g.textBaseline = 'middle';
   const y = size / 2 + 8;

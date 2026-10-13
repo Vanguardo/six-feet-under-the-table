@@ -140,6 +140,15 @@ export class Sfx {
     this.ear.frequency.value = 20000;
     this.pan = this.ctx.createStereoPanner();
     this.master.connect(this.ear).connect(this.pan).connect(this.ctx.destination);
+    // La cave répond : une réverbération de pierre, courte et sombre, sur tout ce qu'on entend.
+    const reverb = this.ctx.createConvolver();
+    reverb.buffer = cellarImpulse(this.ctx);
+    const wet = this.ctx.createGain();
+    wet.gain.value = 0.28;
+    const tone = this.ctx.createBiquadFilter();
+    tone.type = 'lowpass';
+    tone.frequency.value = 3200;
+    this.pan.connect(reverb).connect(tone).connect(wet).connect(this.ctx.destination);
     if (this.deaf) this.setDeaf(true);
     const length = Math.floor(this.ctx.sampleRate * 0.25);
     this.noise = this.ctx.createBuffer(1, length, this.ctx.sampleRate);
@@ -187,4 +196,24 @@ export class Sfx {
     osc.start(now);
     osc.stop(now + duration + 0.02);
   }
+}
+
+/** Réponse d'une cave voûtée : quelques échos précoces sur la pierre, puis une queue qui meurt en 1,6 s. */
+function cellarImpulse(ctx: AudioContext) {
+  const rate = ctx.sampleRate;
+  const length = Math.floor(rate * 1.6);
+  const buffer = ctx.createBuffer(2, length, rate);
+  for (let ch = 0; ch < 2; ch++) {
+    const data = buffer.getChannelData(ch);
+    for (let i = 0; i < length; i++) {
+      const t = i / rate;
+      data[i] = (Math.random() * 2 - 1) * Math.exp(-t * 3.6) * 0.5;
+    }
+    // Échos précoces : les murs de briques, le plafond bas.
+    for (const [delay, gain] of [[0.019, 0.5], [0.031, 0.35], [0.047, 0.3], [0.071, 0.2]]) {
+      const at = Math.floor((delay + ch * 0.003) * rate);
+      for (let k = 0; k < 40; k++) data[at + k] += (Math.random() * 2 - 1) * gain;
+    }
+  }
+  return buffer;
 }
