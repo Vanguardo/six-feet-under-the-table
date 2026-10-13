@@ -11,6 +11,7 @@ import {
   WALL_HEIGHT,
 } from './config';
 import { buildDecor } from './render/decor';
+import { buildCreditorDesk } from './render/creditorDesk';
 import { glowTexture, volumeMaterial } from './render/volume';
 import { brickTexture, feltTexture, floorTexture, grimeTexture, leatherTexture, repeated, woodTexture } from './render/textures';
 
@@ -220,6 +221,7 @@ export function createStage(container: HTMLElement, world: RAPIER.World): Stage 
 
   const neon = buildCellar(scene);
   const decor = buildDecor(scene);
+  buildCreditorDesk(scene);
   const animateDecor = (time: number) => {
     neon(time);
     decor(time);

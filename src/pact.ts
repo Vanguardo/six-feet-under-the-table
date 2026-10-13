@@ -25,7 +25,8 @@ const CW = PAPER_W * PX;
 const CH = PAPER_DEPTH * PX;
 // Elle part de la planche du créancier et vient se poser devant le joueur.
 const PAPER_FROM = new THREE.Vector3(0, 0.83, -9);
-const PAPER_TO = new THREE.Vector3(0, 0.02, 4.4);
+// Assez loin du rail capitonné pour qu'il ne cache pas le bas du contrat.
+const PAPER_TO = new THREE.Vector3(0, 0.02, 3.3);
 const INK = '#3a0808';
 
 /** Silhouettes des parties du corps, dessinées dans un carré de 100 × 100. */
@@ -75,14 +76,15 @@ class ContractPaper {
   private stamp: Zone | null = null;
 
   constructor(readonly options: BodyPartId[]) {
-    this.canvas.width = CW;
-    this.canvas.height = CH;
+    // Dessinée en double résolution : le texte doit rester lisible malgré le rendu basse définition.
+    this.canvas.width = CW * 2;
+    this.canvas.height = CH * 2;
     this.texture = new THREE.CanvasTexture(this.canvas);
     this.texture.colorSpace = THREE.SRGBColorSpace;
     this.mesh = new THREE.Mesh(
       new THREE.PlaneGeometry(PAPER_W, PAPER_DEPTH),
       // Teinte sombre : sous l'ampoule, un papier clair serait brûlé par le bloom.
-      new THREE.MeshStandardMaterial({ map: this.texture, color: 0x6e6658, roughness: 1, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -2 }),
+      new THREE.MeshStandardMaterial({ map: this.texture, emissiveMap: this.texture, emissive: 0x4a4238, color: 0x7a7262, roughness: 1, side: THREE.DoubleSide, polygonOffset: true, polygonOffsetFactor: -2 }),
     );
     this.mesh.rotation.set(-Math.PI / 2, 0, (Math.random() - 0.5) * 0.08);
     this.mesh.receiveShadow = true;
@@ -98,6 +100,7 @@ class ContractPaper {
 
   draw() {
     const g = this.canvas.getContext('2d')!;
+    g.setTransform(2, 0, 0, 2, 0, 0);
     g.fillStyle = '#d6c6a2';
     g.fillRect(0, 0, CW, CH);
     // Papier vieilli : taches, auréoles, bords plus sombres.
@@ -116,10 +119,10 @@ class ContractPaper {
 
     g.fillStyle = '#1a0e08';
     g.textAlign = 'center';
-    g.font = 'bold 44px "Courier New", monospace';
-    g.fillText(t('contract.title'), CW / 2, 56);
-    g.font = '18px "Courier New", monospace';
-    g.fillText(t('contract.terms'), CW / 2, 92);
+    g.font = '52px "IM Fell English SC", Georgia, serif';
+    g.fillText(t('contract.title'), CW / 2, 58);
+    g.font = '20px "Special Elite", "Courier New", monospace';
+    g.fillText(t('contract.terms'), CW / 2, 94);
 
     this.zones.forEach((z, i) => {
       if (z.part === 'refus') {
@@ -127,7 +130,7 @@ class ContractPaper {
         g.lineWidth = 2;
         g.strokeRect(z.x, z.y, z.w, z.h);
         g.fillStyle = i === this.hovered ? '#8a1010' : '#5a3a1e';
-        g.font = 'bold 20px "Courier New", monospace';
+        g.font = '22px "IM Fell English SC", Georgia, serif';
         g.fillText(t('contract.refuse'), z.x + z.w / 2, z.y + 28);
         return;
       }
@@ -149,14 +152,14 @@ class ContractPaper {
       ICONS[z.part](g);
       g.restore();
       g.fillStyle = '#1a0e08';
-      g.font = 'bold 20px "Courier New", monospace';
+      g.font = '25px "IM Fell English SC", Georgia, serif';
       g.fillText(partName(z.part), z.x + z.w / 2, z.y + 150);
-      g.font = '15px "Courier New", monospace';
-      wrap(g, partEffect(z.part), z.x + z.w / 2, z.y + 176, z.w - 16, 18);
+      g.font = '17px "Special Elite", "Courier New", monospace';
+      wrap(g, partEffect(z.part), z.x + z.w / 2, z.y + 178, z.w - 12, 20);
     });
 
     g.fillStyle = '#3a2a1a';
-    g.font = 'italic 16px "Courier New", monospace';
+    g.font = '16px "Special Elite", "Courier New", monospace';
     g.fillText(t('contract.sign'), CW / 2 - 60, CH - 34);
     if (this.stamp) drawThumbprint(g, this.stamp.x + this.stamp.w / 2, this.stamp.y + 70);
     this.texture.needsUpdate = true;

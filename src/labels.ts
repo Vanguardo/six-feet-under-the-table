@@ -6,21 +6,37 @@ function digitTexture(value: number, scoring: boolean): THREE.Texture {
   const key = `${value}-${scoring}`;
   const cached = textures.get(key);
   if (cached) return cached;
-  const size = 64;
+  const size = 128;
   const canvas = document.createElement('canvas');
   canvas.width = canvas.height = size;
   const g = canvas.getContext('2d')!;
-  g.font = 'bold 50px "Courier New", monospace';
+  // Chiffre gravé à l'ancienne : contour d'encre, dorure qui luit si le dé marque.
+  g.font = '104px "IM Fell English SC", Georgia, serif';
   g.textAlign = 'center';
   g.textBaseline = 'middle';
-  g.lineWidth = 8;
+  const y = size / 2 + 8;
+  if (scoring) {
+    g.shadowColor = 'rgba(255, 190, 70, 0.9)';
+    g.shadowBlur = 18;
+  }
+  g.lineWidth = 12;
   g.strokeStyle = '#0a0503';
-  g.strokeText(String(value), size / 2, size / 2 + 3);
-  g.fillStyle = scoring ? '#f2c14e' : '#9c927c';
-  g.fillText(String(value), size / 2, size / 2 + 3);
+  g.strokeText(String(value), size / 2, y);
+  g.shadowBlur = 0;
+  const grad = g.createLinearGradient(0, 20, 0, 110);
+  if (scoring) {
+    grad.addColorStop(0, '#fff2b8');
+    grad.addColorStop(0.5, '#f2c14e');
+    grad.addColorStop(1, '#a8701a');
+  } else {
+    grad.addColorStop(0, '#d8cfb8');
+    grad.addColorStop(1, '#7a7060');
+  }
+  g.fillStyle = grad;
+  g.fillText(String(value), size / 2, y);
   const tex = new THREE.CanvasTexture(canvas);
-  tex.magFilter = THREE.NearestFilter;
-  tex.minFilter = THREE.NearestFilter;
+  tex.magFilter = THREE.LinearFilter;
+  tex.minFilter = THREE.LinearFilter;
   tex.colorSpace = THREE.SRGBColorSpace;
   textures.set(key, tex);
   return tex;

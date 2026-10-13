@@ -23,6 +23,8 @@ window.addEventListener('error', fail);
 window.addEventListener('unhandledrejection', fail);
 
 await RAPIER.init();
+// Les polices des chiffres gravés doivent être là avant qu'on les dessine dans les textures.
+await Promise.race([Promise.all([document.fonts.load('48px "IM Fell English SC"'), document.fonts.load('16px "Special Elite"')]), new Promise((r) => setTimeout(r, 2500))]).catch(() => {});
 
 // Sauvegarde et langue avant tout affichage.
 const progress = new Progress();

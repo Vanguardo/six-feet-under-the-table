@@ -213,20 +213,32 @@
         transition: opacity 0.25s;
       }
       #tally.show { opacity: 1; }
-      #tally .name { font-size: 22px; letter-spacing: 3px; text-transform: uppercase; color: #e8dcc0; text-shadow: 0 2px 0 #000; }
+      #tally .name { font-family: "IM Fell English SC", Georgia, serif; font-size: 30px; letter-spacing: 3px; color: #f0e4c8; text-shadow: 0 2px 0 #000, 0 0 18px rgba(242, 193, 78, 0.35); }
       #tally .boxes { display: flex; gap: 10px; align-items: center; justify-content: center; margin-top: 6px; }
+      /* Jetons : une plaque d'étain bleui, gravée. Mult : un sceau de cire rouge. */
       #tally .chips, #tally .mult {
-        min-width: 90px;
-        padding: 6px 12px;
-        font-size: 30px;
-        font-weight: bold;
+        min-width: 96px;
+        padding: 6px 14px 4px;
+        font-family: "IM Fell English SC", Georgia, serif;
+        font-size: 34px;
         color: #fff;
         display: inline-block;
+        border-radius: 3px;
+        text-shadow: 0 2px 0 rgba(0, 0, 0, 0.6);
       }
-      #tally .chips { background: #1f5a8c; box-shadow: 0 0 16px rgba(95, 168, 232, 0.5); }
-      #tally .mult { background: #8c1f1a; box-shadow: 0 0 16px rgba(232, 72, 63, 0.5); }
-      #tally .x { font-size: 26px; color: #e8dcc0; }
-      #tally .total { font-size: 38px; font-weight: bold; color: #f2c14e; margin-top: 6px; min-height: 44px; text-shadow: 0 0 14px rgba(242, 193, 78, 0.6); }
+      #tally .chips {
+        background: linear-gradient(#4a7aa8, #1c3e62 60%, #12283f);
+        border: 1px solid #8ab8e0;
+        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.35), inset 0 -3px 6px rgba(0, 0, 0, 0.4), 0 0 18px rgba(95, 168, 232, 0.45), 0 4px 10px rgba(0, 0, 0, 0.7);
+      }
+      #tally .mult {
+        background: radial-gradient(circle at 35% 30%, #d84a3a, #8c1a14 55%, #4a0806);
+        border: 1px solid #f08070;
+        border-radius: 46% 54% 50% 48% / 52% 46% 54% 48%;
+        box-shadow: inset 0 2px 3px rgba(255, 200, 180, 0.35), inset 0 -4px 8px rgba(0, 0, 0, 0.5), 0 0 18px rgba(232, 72, 63, 0.45), 0 4px 10px rgba(0, 0, 0, 0.7);
+      }
+      #tally .x { font-family: "IM Fell English SC", Georgia, serif; font-size: 30px; color: #e8dcc0; text-shadow: 0 2px 0 #000; }
+      #tally .total { font-family: "IM Fell English SC", Georgia, serif; font-size: 48px; color: #f6cc58; margin-top: 4px; min-height: 52px; text-shadow: 0 2px 0 #3a1a04, 0 0 22px rgba(242, 193, 78, 0.65); }
       .bump { animation: bump 0.18s ease-out; }
       @keyframes bump { 0% { transform: scale(1.35); } 100% { transform: scale(1); } }
       #tooltip {
