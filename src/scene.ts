@@ -129,7 +129,7 @@ export function createStage(container: HTMLElement, world: RAPIER.World): Stage 
   dustGeo.setAttribute('position', new THREE.BufferAttribute(dustPos, 3));
   const dust = new THREE.Points(
     dustGeo,
-    new THREE.PointsMaterial({ color: 0xffe0b0, size: 0.06, transparent: true, opacity: 0.5, depthWrite: false }),
+    new THREE.PointsMaterial({ color: 0xffe0b0, size: 0.16, map: glowTexture(), transparent: true, opacity: 0.55, depthWrite: false, blending: THREE.AdditiveBlending }),
   );
   scene.add(dust);
 

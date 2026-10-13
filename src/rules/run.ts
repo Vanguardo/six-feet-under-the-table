@@ -38,6 +38,8 @@ const TONGUE_TAX = 1.3;
 
 const SHOP_DICE: DieTypeId[] = ['ecrase', 'noirci', 'ivoire', 'pipe', 'verre', 'plomb', 'maudit'];
 const SHOP_MODS = Object.keys(FACE_MODS) as FaceModId[];
+/** Le sachet coûte un peu plus qu'un article seul : on paie le choix. */
+const SACHET_PRICE = 5;
 
 export interface Earnings {
   echeance: number;
@@ -52,7 +54,8 @@ export type ShopItem =
   | { kind: 'gravure'; combo: ComboId; price: number }
   | { kind: 'die'; type: DieTypeId; price: number }
   | { kind: 'burin'; mod: FaceModId; price: number }
-  | { kind: 'fiole'; vial: VialId; price: number };
+  | { kind: 'fiole'; vial: VialId; price: number }
+  | { kind: 'sachet'; dice: DieTypeId[]; mods: FaceModId[]; price: number };
 
 /** Un article qui demande de choisir un dé (et une face pour un burin). */
 export const needsTarget = (item: ShopItem) => item.kind === 'die' || item.kind === 'burin';
@@ -336,6 +339,14 @@ export class RunState {
     if (this.toothDie) {
       items.push({ kind: 'die', type: 'dent', price: 0 });
       this.toothDie = false;
+    } else if (this.rng.next() < 0.25) {
+      // Un sachet de toile : trois dés ou trois gravures, on n'en garde qu'un.
+      const pickN = <T,>(pool: T[]) => {
+        const copy = [...pool];
+        return Array.from({ length: Math.min(3, copy.length) }, () => copy.splice(this.rng.int(copy.length), 1)[0]);
+      };
+      const dice = this.rng.next() < 0.5;
+      items.push({ kind: 'sachet', dice: dice ? pickN(SHOP_DICE) : [], mods: dice ? [] : pickN(SHOP_MODS), price: this.price(SACHET_PRICE) });
     } else if (this.rng.next() < 0.5) {
       const type = this.rng.pick(SHOP_DICE);
       items.push({ kind: 'die', type, price: this.price(DIE_TYPES[type].price) });
@@ -375,6 +386,8 @@ export class RunState {
   buy(index: number, die = -1, face = -1): ShopItem | null {
     const item = this.shop[index];
     if (!item || !this.canBuy(index)) return null;
+    // Un sachet ne s'achète pas tel quel : on l'ouvre d'abord (openSachet).
+    if (item.kind === 'sachet') return null;
     if (item.kind === 'die' && !this.dice[die]) return null;
     if (item.kind === 'burin' && (!this.dice[die] || face < 0 || face > 5)) return null;
     this.coins -= item.price;
@@ -397,6 +410,15 @@ export class RunState {
     }
     this.shop[index] = null;
     return item;
+  }
+
+  /** Le sachet ouvert : le choix remplace le sachet dans la valise, au même prix. */
+  openSachet(index: number, choice: number) {
+    const item = this.shop[index];
+    if (item?.kind !== 'sachet') return;
+    this.shop[index] = item.dice.length
+      ? { kind: 'die', type: item.dice[choice], price: item.price }
+      : { kind: 'burin', mod: item.mods[choice], price: item.price };
   }
 
   canSell(index: number) {

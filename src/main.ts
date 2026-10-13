@@ -112,7 +112,7 @@ function frame(now: number) {
   const dt = Math.min(0.1, (now - last) / 1000);
   last = now;
   time += dt;
-  accumulator += dt;
+  accumulator += dt * game!.timeScale;
   let steps = 0;
   while (accumulator >= PHYSICS_DT && steps < MAX_STEPS_PER_FRAME) {
     stepPhysics();

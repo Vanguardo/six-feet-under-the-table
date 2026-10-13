@@ -131,10 +131,46 @@ export class Hud {
     if (m.textContent !== prevM) this.bump(m);
   }
 
-  setTallyTotal(total: number) {
-    const t = this.tally.querySelector('.total')!;
-    t.textContent = `= ${fmt(total)}`;
-    this.bump(t);
+  /** Le total défile comme un compteur mécanique ; `tick` sonne à chaque cran (pour le son). */
+  setTallyTotal(total: number, tick?: (k: number) => void) {
+    const el = this.tally.querySelector('.total')! as HTMLElement;
+    const start = performance.now();
+    const duration = Math.min(900, 380 + Math.log10(Math.max(10, total)) * 120);
+    let lastTick = 0;
+    let shown = -1;
+    const step = (now: number) => {
+      const k = Math.min(1, (now - start) / duration);
+      const eased = 1 - (1 - k) ** 3;
+      const value = Math.round(total * eased);
+      if (value !== shown) {
+        shown = value;
+        el.textContent = `= ${fmt(value)}`;
+        if (tick && now - lastTick > 34) {
+          lastTick = now;
+          tick(k);
+        }
+      }
+      if (k < 1) requestAnimationFrame(step);
+      else {
+        el.textContent = `= ${fmt(total)}`;
+        this.bump(el);
+      }
+    };
+    el.textContent = '= 0';
+    requestAnimationFrame(step);
+  }
+
+  /** Grande carte de titre au centre : l'entrée d'un boss, le début d'une nuit. */
+  showCard(title: string, sub: string, kind: 'boss' | 'night') {
+    const card = document.getElementById('titlecard')!;
+    card.className = kind;
+    card.innerHTML = `<div class="title">${title}</div><div class="sub">${sub}</div>`;
+    void card.offsetWidth;
+    card.classList.add('show');
+  }
+
+  hideCard() {
+    document.getElementById('titlecard')!.classList.remove('show');
   }
 
   hideTally() {

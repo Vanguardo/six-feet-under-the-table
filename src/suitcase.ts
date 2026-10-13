@@ -92,6 +92,25 @@ function gravurePlate(name: string): THREE.Object3D {
   return g2;
 }
 
+/** Sachet de toile de jute, ventru, noué d'une ficelle. */
+function pouch(): THREE.Object3D {
+  const g = new THREE.Group();
+  const cloth = new THREE.MeshStandardMaterial({ color: 0x9a7a4a, map: grimeTexture(), bumpMap: grimeTexture(), bumpScale: 3, roughness: 1 });
+  const body = new THREE.Mesh(new THREE.SphereGeometry(0.42, 10, 8), cloth);
+  body.scale.set(1, 0.85, 1);
+  body.position.y = 0.36;
+  const neck = new THREE.Mesh(new THREE.CylinderGeometry(0.12, 0.2, 0.22, 8), cloth);
+  neck.position.y = 0.78;
+  const frill = new THREE.Mesh(new THREE.ConeGeometry(0.22, 0.22, 8, 1, true), cloth);
+  frill.position.y = 0.98;
+  frill.rotation.x = Math.PI;
+  const string = new THREE.Mesh(new THREE.TorusGeometry(0.13, 0.025, 4, 10), new THREE.MeshStandardMaterial({ color: 0x5a1a10, roughness: 0.8 }));
+  string.position.y = 0.8;
+  string.rotation.x = Math.PI / 2;
+  g.add(body, neck, frill, string);
+  return g;
+}
+
 /** Ciseau à bois dont la pointe a la couleur de la gravure. */
 function chisel(color: string): THREE.Object3D {
   const g = new THREE.Group();
@@ -132,6 +151,11 @@ function itemMesh(item: ShopItem): THREE.Object3D {
     case 'burin': {
       const o = chisel(FACE_MODS[item.mod].color);
       o.userData.baseScale = 1.6;
+      return o;
+    }
+    case 'sachet': {
+      const o = pouch();
+      o.userData.baseScale = 1.4;
       return o;
     }
     case 'fiole': {

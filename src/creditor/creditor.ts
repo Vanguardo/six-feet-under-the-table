@@ -87,6 +87,10 @@ class Engraving {
   private readonly bumpFresh = layer();
   private readonly bumpCores = layer();
   private readonly bump = layer();
+  /** Le sang qui remplit les sillons à mesure que la dette est payée. */
+  private readonly blood = layer();
+  private bloodShown = 0;
+  private bloodTarget = 0;
   private readonly colorTex: THREE.CanvasTexture;
   private readonly bumpTex: THREE.CanvasTexture;
   private holes: Hole[] = [];
@@ -124,7 +128,8 @@ class Engraving {
     if (this.scars.length > 500) this.scars = this.scars.slice(-500);
     this.holes = layoutHoles(text);
     this.drawn = 0;
-    for (const c of [this.fresh, this.cores, this.bumpFresh, this.bumpCores]) c.getContext('2d')!.clearRect(0, 0, FACE_W, FACE_H);
+    this.bloodShown = this.bloodTarget = 0;
+    for (const c of [this.fresh, this.cores, this.bumpFresh, this.bumpCores, this.blood]) c.getContext('2d')!.clearRect(0, 0, FACE_W, FACE_H);
     this.paintBase();
     this.compose();
   }
@@ -145,6 +150,42 @@ class Engraving {
     this.drawn = target;
     this.compose();
     return added;
+  }
+
+  /** Part de la dette déjà payée (0 → 1) : le sang monte dans la gravure, de gauche à droite. */
+  setPaid(p: number) {
+    this.bloodTarget = THREE.MathUtils.clamp(p, 0, 1);
+  }
+
+  /** Le sang coule doucement vers sa cible ; renvoie vrai tant qu'il coule. */
+  tick(dt: number): boolean {
+    if (Math.abs(this.bloodTarget - this.bloodShown) < 0.001) return false;
+    const before = Math.floor(this.bloodShown * this.drawn);
+    const diff = this.bloodTarget - this.bloodShown;
+    const step = diff * Math.min(1, dt * 2.2) + Math.sign(diff) * dt * 0.05;
+    this.bloodShown = Math.abs(step) >= Math.abs(diff) ? this.bloodTarget : this.bloodShown + step;
+    const after = Math.floor(this.bloodShown * this.drawn);
+    if (after === before) return true;
+    const g = this.blood.getContext('2d')!;
+    // Les trous sont rangés de gauche à droite : le sang suit le même chemin que l'ongle.
+    // On n'ajoute que les nouveaux ; on ne repart de zéro que si le sang recule.
+    let from = before;
+    if (after < before) {
+      g.clearRect(0, 0, FACE_W, FACE_H);
+      from = 0;
+    }
+    for (const h of this.holes.slice(from, after)) {
+      const grad = g.createRadialGradient(h.x - h.r * 0.35, h.y - h.r * 0.35, 0, h.x, h.y, h.r * 0.95);
+      grad.addColorStop(0, 'rgb(230, 70, 60)');
+      grad.addColorStop(0.35, 'rgb(150, 10, 10)');
+      grad.addColorStop(1, 'rgb(60, 0, 0)');
+      g.fillStyle = grad;
+      g.beginPath();
+      g.arc(h.x, h.y, h.r * 0.95, 0, Math.PI * 2);
+      g.fill();
+    }
+    this.compose();
+    return true;
   }
 
   /** Le trou en train d'être creusé (repère de l'ardoise) : la main suit cette position. */
@@ -177,6 +218,7 @@ class Engraving {
     g.drawImage(this.base, 0, 0);
     g.drawImage(this.fresh, 0, 0);
     g.drawImage(this.cores, 0, 0);
+    g.drawImage(this.blood, 0, 0);
     const b = this.bump.getContext('2d')!;
     b.fillStyle = 'rgb(200, 200, 200)';
     b.fillRect(0, 0, FACE_W, FACE_H);
@@ -337,6 +379,11 @@ export class Creditor {
         this.smile.raise(false);
       },
     });
+  }
+
+  /** La dette payée remplit de sang le chiffre gravé. */
+  setPaid(p: number) {
+    this.engraving.setPaid(p);
   }
 
   /** Mauvais lancer : le sourire s'élargit lentement. */
@@ -712,6 +759,7 @@ export class Creditor {
     this.follow(this.right, this.current.right, right, stiffness, this.action ? stiffness * 1.5 : fingerStiffness, dt);
     this.follow(this.left, this.current.left, left, stiffness, this.action ? stiffness * 1.5 : 12, dt);
     this.smile.update(dt, clock, camera);
+    this.engraving.tick(dt);
   }
 
   /**

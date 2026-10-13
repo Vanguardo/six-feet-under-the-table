@@ -8,7 +8,7 @@ import { Die } from './dice';
 import { CHIPS_COLOR, COIN_COLOR, FloatTexts, MULT_COLOR, XMULT_COLOR } from './floatText';
 import { Hud, ticketLines } from './hud';
 import { fmtNum, plural, setLang, t } from './i18n';
-import { bossName, bossRule, comboName, dieDesc, dieName, modName, partEffect, partName, rarityName, relicDesc, relicName } from './i18n/names';
+import { bossName, bossRule, comboName, dieDesc, dieName, modDesc, modName, partEffect, partName, rarityName, relicDesc, relicName } from './i18n/names';
 import { Menu, type RunSummary } from './menu';
 import { MousePrompt } from './mousePrompt';
 import { PlayerHands } from './playerHands';
@@ -39,6 +39,8 @@ import { CUP_INNER_RADIUS, CUP_WALL } from './config';
 
 /** Vitesse du gobelet au lâcher au-delà de laquelle un lancer compte comme violent. */
 const VIOLENT_THROW = 25;
+
+const ROMAN = ['', 'I', 'II', 'III', 'IV', 'V', 'VI', 'VII'];
 
 // Écran titre : la caméra glisse vers le créancier.
 const TITLE_LOOK = new THREE.Vector3(0, -0.6, -10);
@@ -97,6 +99,11 @@ export class Game {
   private introAt = 0;
   private introStage = 0;
   private pactSkippable = false;
+  /** Ralenti : jusqu'à quand (en temps réel) et à quelle vitesse. */
+  private slowUntil = 0;
+  private slowScale = 1;
+  /** Séquence de cinéma en cours (entrée d'un boss) : un clic l'abrège. */
+  private cinematic: { end: () => void } | null = null;
   /** Pour le bilan de fin : total payé et meilleure main de la run. */
   private runPaid = 0;
   private runHands = 0;
@@ -304,6 +311,7 @@ export class Game {
       }
       // Un clic pendant le gros plan automatique : on se rassoit tout de suite.
       if (this.ticketZoom === 'auto') return this.endTicketZoom();
+      if (this.cinematic) return this.cinematic.end();
       // Encre débouchée : le dé cliqué se retourne.
       if (this.inking >= 0 && this.phase === 'play') {
         const die = this.table.pickDie();
@@ -606,9 +614,18 @@ export class Game {
     }
     if (seq.next >= steps.length && seq.totalAt < 0) seq.totalAt = Math.max(this.clock, seq.nextAt) + 0.15;
     if (seq.totalAt > 0 && seq.endAt < 0 && this.clock >= seq.totalAt) {
-      this.hud.setTallyTotal(seq.breakdown.total);
+      this.hud.setTallyTotal(seq.breakdown.total, (k) => this.sfx.tone(SCORE_BASE_HZ * (1.5 + k * 1.5), 0.03, 0.08, 'square'));
       this.sfx.tone(SCORE_BASE_HZ * 2, 0.5, 0.25, 'square');
       this.sfx.tone(SCORE_BASE_HZ * 3, 0.5, 0.15);
+      // Cette main règle la dette : le temps se fige un instant, un coup sourd, l'ampoule s'emballe.
+      if (this.run.score + seq.breakdown.total >= this.run.target) {
+        this.slowmo(0.75, 0.22);
+        this.sfx.toneAt(0.05, 70, 38, 0.6, 0.6);
+        this.sfx.burst({ type: 'lowpass', freq: 300, duration: 0.5, volume: 0.8 });
+        this.stage.flare.value = 1;
+        this.fx.jolt(0.8);
+        this.fx.aberration(0.006);
+      }
       // Une main qui pèse : l'ampoule s'emballe, l'or jaillit des dés qui ont marqué.
       const weight = Math.min(1, seq.breakdown.total / Math.max(1, this.run.target - this.run.score));
       if (weight > 0.35) {
@@ -668,6 +685,7 @@ export class Game {
     if (breakdown.total >= this.run.target - this.run.score && !this.run.has('sourireCousu')) this.creditor.clench();
     this.hud.hideTally();
     this.run.score += breakdown.total;
+    this.creditor.setPaid(this.run.score / this.run.target);
     this.ticketLog.push({ name: comboName(result.combo.id), gain: breakdown.total });
     this.runPaid += breakdown.total;
     this.laudanum = false;
@@ -945,6 +963,20 @@ export class Game {
     scene.add(tray, ash, paper, ember, glow);
   }
 
+  /** Vitesse du temps de jeu : 1 en temps normal, moins pendant un ralenti. */
+  get timeScale() {
+    const now = performance.now();
+    if (now >= this.slowUntil) return 1;
+    // Le temps revient en douceur pendant le dernier tiers du ralenti.
+    const left = (this.slowUntil - now) / 1000;
+    return Math.min(1, this.slowScale + (1 - this.slowScale) * Math.max(0, 1 - left / 0.25));
+  }
+
+  private slowmo(seconds: number, scale: number) {
+    this.slowUntil = performance.now() + seconds * 1000;
+    this.slowScale = scale;
+  }
+
   /** Le relevé de fin de run, par-dessus la table assombrie. */
   private showSummary(won: boolean, cause: string) {
     if (this.phase !== 'over') return;
@@ -1021,6 +1053,8 @@ export class Game {
 
   /** Bouffée de poussière soulevée du feutre. */
   private dust(at: THREE.Vector3, amount: number) {
+    // Un dé qui retombe lourdement : la table tremble sous les coudes.
+    if (amount > 0.55) this.fx.jolt(Math.min(0.16, (amount - 0.55) * 0.25));
     const n = 1 + Math.round(amount * 4);
     for (let i = 0; i < n; i++) {
       const a = Math.random() * Math.PI * 2;
@@ -1122,6 +1156,7 @@ export class Game {
     } else {
       const item = this.run.shop[target.index];
       if (!item || !this.run.canBuy(target.index)) return this.sfx.tone(140, 0.2, 0.2, 'square');
+      if (item.kind === 'sachet') return this.openSachet(target.index);
       if (needsTarget(item)) {
         this.targeting = target.index;
         this.hud.hideTooltip();
@@ -1133,6 +1168,32 @@ export class Game {
         this.complete(target.index);
       }
     }
+  }
+
+  /** Le sachet s'ouvre sur trois choix ; celui qu'on prend se pose comme un article ordinaire. */
+  private openSachet(index: number) {
+    const item = this.run.shop[index];
+    if (item?.kind !== 'sachet') return;
+    this.hud.hideTooltip();
+    this.sfx.burst({ type: 'bandpass', freq: 900, freqEnd: 400, q: 1.5, duration: 0.35, volume: 0.5 }); // la toile qu'on dénoue
+    const cards = item.dice.length
+      ? item.dice.map((d) => ({ name: dieName(d), desc: dieDesc(d), extra: DIE_TYPES[d].faces.join(' ') }))
+      : item.mods.map((m) => ({ name: modName(m), desc: modDesc(m) }));
+    this.panel.choose(
+      this.run,
+      t('item.sachet'),
+      cards,
+      (choice) => {
+        this.run.openSachet(index, choice);
+        this.fillSuitcase(true);
+        const chosen = this.run.shop[index]!;
+        this.targeting = index;
+        this.highlightTargets(true);
+        const what = chosen.kind === 'die' ? t('shop.askReplace', { die: dieName(chosen.type).toLowerCase() }) : t('shop.askEngrave');
+        this.panel.ask(this.run, what, () => this.cancelTarget());
+      },
+      () => this.cancelTarget(),
+    );
   }
 
   private cancelTarget() {
@@ -1238,8 +1299,9 @@ export class Game {
     const boss = this.run.boss;
     this.bossProps.show(boss?.id ?? null, this.clock);
     this.ticketLog = [];
+    // Le sang de l'échéance précédente se retire de la gravure.
+    this.creditor.setPaid(0);
     this.printTicket();
-    if (boss) this.showFlash(t('flash.boss', { name: bossName(boss), rule: bossRule(boss) }));
     if (this.run.confiscated >= 0) this.showFlash(t('flash.confiscated', { die: dieName(this.run.dice[this.run.confiscated].type).toLowerCase() }));
   }
 
@@ -1276,6 +1338,9 @@ export class Game {
     this.pact.reset();
     this.fx.lean(null);
     this.ticketZoom = null;
+    this.cinematic = null;
+    this.slowUntil = 0;
+    this.hud.hideCard();
     this.printer.reset();
     this.coinShower.clear();
     this.coinsPending = 0;
@@ -1375,6 +1440,11 @@ export class Game {
     this.ticketZoom = 'auto';
     const f = this.printer.focus();
     this.fx.lean(f.look, f.from);
+    if (this.run.echeance === 0 && !this.run.tutorial) {
+      this.hud.showCard(t('card.night', { n: ROMAN[this.run.night] ?? String(this.run.night) }), t('card.nightSub', { debt: fmt(this.run.target) }), 'night');
+      this.sfx.toneAt(0.2, 196, 194, 1.6, 0.12, 'triangle');
+      this.sfx.toneAt(0.2, 233, 231, 1.6, 0.08, 'triangle');
+    }
     const run = this.run;
     this.later(this.printer.printTime + 1.4, () => {
       if (this.run === run && this.ticketZoom === 'auto') this.endTicketZoom();
@@ -1384,8 +1454,33 @@ export class Game {
   private endTicketZoom() {
     const wasAuto = this.ticketZoom === 'auto';
     this.ticketZoom = null;
+    this.hud.hideCard();
     if (this.phase !== 'pact') this.fx.lean(null);
-    if (wasAuto && this.phase === 'play') this.creditor.engrave(fmt(this.run.target));
+    if (!wasAuto || this.phase !== 'play') return;
+    if (this.run.boss && !this.run.tutorial) this.bossReveal();
+    else this.creditor.engrave(fmt(this.run.target));
+  }
+
+  /** Le boss entre : gros plan sur l'objet qu'il a posé, son nom en lettres de sang, un bourdon. */
+  private bossReveal() {
+    const boss = this.run.boss!;
+    const at = new THREE.Vector3(-1.6, 1.5, -7.95);
+    this.fx.lean(at, new THREE.Vector3(-1.4, 3.4, -3.9), 2);
+    this.hud.showCard(bossName(boss), bossRule(boss), 'boss');
+    this.sfx.toneAt(0.1, 55, 52, 2.4, 0.5, 'sawtooth');
+    this.sfx.toneAt(0.1, 82, 80, 2.2, 0.25, 'sawtooth');
+    this.sfx.burst({ type: 'lowpass', freq: 200, duration: 1.2, volume: 0.6 });
+    this.fx.tear(0.4);
+    const run = this.run;
+    const end = () => {
+      if (this.cinematic?.end !== end) return;
+      this.cinematic = null;
+      this.hud.hideCard();
+      this.fx.lean(null);
+      if (this.run === run && this.phase === 'play') this.creditor.engrave(fmt(this.run.target));
+    };
+    this.cinematic = { end };
+    this.later(2.8, end);
   }
 
   /** Tab ou clic droit maintenu : on se penche sur le ticket pour le relire. */

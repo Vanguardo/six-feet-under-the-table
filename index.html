@@ -396,6 +396,12 @@
       #ticket .boss { color: #7a0a0a; font-weight: bold; }
       #ticket .warn { color: #7a0a0a; }
       #banner small { display: block; font-size: 14px; letter-spacing: 1px; color: #d8cfb8; margin-top: 8px; }
+      /* Carte de titre : l'entrée d'un boss, le numéro de la nuit. */
+      #titlecard { position: fixed; left: 50%; top: 17%; padding: 14px 60px 18px; background: radial-gradient(ellipse at center, rgba(0, 0, 0, 0.82) 0%, rgba(0, 0, 0, 0.6) 55%, rgba(0, 0, 0, 0) 75%); transform: translate(-50%, -50%) scale(0.96); text-align: center; pointer-events: none; opacity: 0; transition: opacity 0.5s, transform 2.6s ease-out; z-index: 6; white-space: nowrap; }
+      #titlecard.show { opacity: 1; transform: translate(-50%, -50%) scale(1.04); }
+      #titlecard .title { font-family: "IM Fell English SC", Georgia, serif; font-size: clamp(36px, 7vw, 78px); letter-spacing: 6px; color: #e8dcc0; text-shadow: 0 3px 0 #000, 0 0 30px rgba(0, 0, 0, 0.9); }
+      #titlecard.boss .title { color: #d01830; text-shadow: 0 3px 0 #1a0004, 0 0 32px rgba(200, 16, 46, 0.6); }
+      #titlecard .sub { margin-top: 6px; font-size: clamp(13px, 1.8vw, 18px); color: #c8bca0; text-shadow: 0 2px 4px #000; white-space: normal; max-width: 70vw; }
       #loading { position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; background: #000; color: #8a7a60; font: 14px "Courier New", monospace; letter-spacing: 4px; z-index: 50; }
       #loading span { animation: blink 1.2s steps(2) infinite; }
       #loading.error { color: #b03030; letter-spacing: 1px; padding: 24px; text-align: center; }
@@ -461,6 +467,7 @@
     <div id="blackout"></div>
     <div id="menu"></div>
     <div id="toast"></div>
+    <div id="titlecard"></div>
     <div id="loading"><span>LOADING</span></div>
     <script type="module" src="/src/main.ts"></script>
   </body>

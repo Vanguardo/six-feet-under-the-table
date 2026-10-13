@@ -60,6 +60,20 @@ export class ShopPanel {
     );
   }
 
+  /** Sachet ouvert : trois cartes, on en prend une. */
+  choose(run: RunState, title: string, cards: { name: string; desc: string; extra?: string }[], onPick: (i: number) => void, onCancel: () => void) {
+    const html = cards
+      .map((c, i) => `<div class="card"><span class="name">${c.name}</span>${c.extra ? `<span class="rarity">${c.extra}</span>` : ''}<span class="desc">${c.desc}</span><div class="row"><button data-action="pick" data-index="${i}">${t('shop.take')}</button></div></div>`)
+      .join('');
+    this.show(
+      `${this.head(run, title)}
+       <div class="sub">${t('shop.sachetHelp')}</div>
+       <div class="items">${html}</div>
+       <div class="actions"><button data-action="cancel">${t('shop.cancel')}</button><span></span></div>`,
+      { pick: onPick, cancel: onCancel },
+    );
+  }
+
   /** Choix de la face à graver ; une gravure existante est remplacée. */
   pickFace(die: OwnedDie, mod: string, onPick: (face: number) => void, onCancel: () => void) {
     const faces = DIE_TYPES[die.type].faces
@@ -116,6 +130,8 @@ export function itemTooltip(item: ShopItem): string {
       });
     case 'burin':
       return t('tip.burin', { name: modName(item.mod), desc: modDesc(item.mod), price: item.price });
+    case 'sachet':
+      return `<b>${t('item.sachet')}</b><br>${item.dice.length ? t('tip.sachetDice') : t('tip.sachetFaces')}<br><b>${item.price} $</b>`;
     case 'fiole':
       return `<b>${t(`vial.${item.vial}.name`, {}, VIALS[item.vial].name)}</b><br>${t(`vial.${item.vial}.desc`, {}, VIALS[item.vial].description)}<br><i>${t('tip.vialUse')}</i><br><b>${item.price} $</b>`;
   }
