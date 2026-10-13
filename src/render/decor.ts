@@ -10,19 +10,47 @@ import { grimeTexture } from './textures';
 
 const BACK = -23.8;
 
-export function buildDecor(scene: THREE.Scene) {
-  buildWindow(scene);
+/** Construit le décor et renvoie son animation (nuages devant la lune, gouttes du tuyau). */
+export function buildDecor(scene: THREE.Scene): (time: number) => void {
+  const moonlight = buildWindow(scene);
   buildPipes(scene);
+  const drip = buildDrip(scene);
   buildChains(scene);
   buildShelf(scene);
   buildCobwebs(scene);
+  return (time) => {
+    moonlight(time);
+    drip(time);
+  };
+}
+
+/** Une goutte qui se forme sous la bride du tuyau, tombe, et s'écrase dans la pénombre. */
+function buildDrip(scene: THREE.Scene) {
+  const from = new THREE.Vector3(-1.2, 9.75, BACK + 0.45);
+  const drop = new THREE.Mesh(new THREE.SphereGeometry(0.06, 6, 4), new THREE.MeshStandardMaterial({ color: 0x9ab0a0, roughness: 0.05, metalness: 0.3, transparent: true, opacity: 0.85 }));
+  drop.scale.set(1, 1.5, 1);
+  scene.add(drop);
+  const PERIOD = 3.1;
+  return (time: number) => {
+    const t = time % PERIOD;
+    if (t < 1.6) {
+      // La goutte enfle au bout de la bride.
+      drop.position.copy(from);
+      drop.scale.setScalar(0.3 + (t / 1.6) * 0.7).multiply(new THREE.Vector3(1, 1.5, 1));
+    } else {
+      const f = t - 1.6;
+      drop.position.set(from.x, from.y - 4.9 * f * f * 2, from.z);
+      drop.visible = drop.position.y > -2;
+    }
+    if (t < 1.6) drop.visible = true;
+  };
 }
 
 const iron = () => new THREE.MeshStandardMaterial({ color: 0x5a4a40, map: grimeTexture(), metalness: 0.7, roughness: 0.6 });
 const rust = () => new THREE.MeshStandardMaterial({ color: 0x6a3a22, map: grimeTexture(), bumpMap: grimeTexture(), bumpScale: 2, metalness: 0.5, roughness: 0.75 });
 
 /** Lucarne haute, barreaux, et le faisceau de lune qui traverse la poussière. */
-function buildWindow(scene: THREE.Scene) {
+function buildWindow(scene: THREE.Scene): (time: number) => void {
   const at = new THREE.Vector3(13.5, 6.6, BACK + 0.05);
   const glass = new THREE.Mesh(new THREE.PlaneGeometry(3.4, 2.2), new THREE.MeshBasicMaterial({ color: 0x8aa8d8, fog: false }));
   glass.position.copy(at);
@@ -60,6 +88,19 @@ function buildWindow(scene: THREE.Scene) {
   moon.position.copy(at).add(new THREE.Vector3(0, 0, 0.5));
   moon.target.position.copy(target);
   scene.add(moon, moon.target);
+
+  // Des nuages passent devant la lune : la lumière froide respire, lentement, irrégulièrement.
+  const beamMat = beam.material as THREE.ShaderMaterial;
+  const glassMat = glass.material as THREE.MeshBasicMaterial;
+  const base = glassMat.color.clone();
+  return (time: number) => {
+    const cloud = 0.55 + 0.45 * (0.5 + 0.5 * Math.sin(time * 0.11) * Math.sin(time * 0.037 + 1.3));
+    moon.intensity = 140 * cloud;
+    beamMat.uniforms.uOpacity.value = 0.022 * cloud;
+    beamMat.uniforms.uTime.value = time;
+    halo.material.opacity = 0.55 * cloud;
+    glassMat.color.copy(base).multiplyScalar(0.55 + 0.45 * cloud);
+  };
 }
 
 /** Tuyaux rouillés le long du mur du fond, avec brides et vanne. */

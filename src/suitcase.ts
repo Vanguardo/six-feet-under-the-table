@@ -3,6 +3,7 @@ import { Hand, MERCHANT_HANDS } from './creditor/hand';
 import { displayDie } from './dice';
 import { ps1ify } from './render/ps1';
 import { feltTexture, grimeTexture, leatherTexture, repeated } from './render/textures';
+import { glowTexture } from './render/volume';
 import { buildRelicMesh } from './relicShelf';
 import { t } from './i18n';
 import { comboName } from './i18n/names';
@@ -27,9 +28,16 @@ interface Slot {
   home: THREE.Vector3;
   fly: { from: THREE.Vector3; to: THREE.Vector3; t: number; onArrive: () => void } | null;
   bornAt: number;
+  /** Zone cliquable invisible, bien plus grande que l'objet : on vise la case, pas le bibelot. */
+  hit: THREE.Mesh;
+  /** Lueur sous l'article survolé. */
+  pad: THREE.Mesh;
 }
 
 const ease = (t: number) => t * t * (3 - 2 * t);
+// Invisible mais touchable : ne dessine rien, n'écrit rien dans la profondeur.
+const HIT_MATERIAL = new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, depthWrite: false, colorWrite: false });
+const PAD_MATERIAL = new THREE.MeshBasicMaterial({ map: glowTexture(), color: 0xffc860, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, depthWrite: false });
 const clamp01 = (t: number) => Math.min(1, Math.max(0, t));
 
 /** Étiquette de prix : un bout de papier, prix en rouge si on ne peut pas payer. */
@@ -151,6 +159,7 @@ export class Suitcase {
   private t = 0;
   private clock = 0;
   private hovered: SuitcaseTarget = null;
+  private readonly lamp = new THREE.PointLight(0xffd8a0, 0, 7, 1.4);
   private onLeft: (() => void) | null = null;
   private readonly lidMaterials: THREE.MeshStandardMaterial[] = [];
 
@@ -159,6 +168,9 @@ export class Suitcase {
     private readonly sfx: Sfx,
   ) {
     this.build();
+    // Une lampe de vitrine sous le couvercle : les articles se détachent du velours.
+    // (toujours dans la scène, éteinte quand la valise est rangée : pas de recompilation des shaders)
+    scene.add(this.lamp);
     scene.add(this.root, this.bell, this.left.root, this.right.root);
     this.setVisible(false);
   }
@@ -230,7 +242,7 @@ export class Suitcase {
 
   /** Remplit la valise ; `affordable(i)` colore les prix. */
   setItems(items: (ShopItem | null)[], affordable: (i: number) => boolean, rerollCost: number, canReroll: boolean) {
-    for (const s of this.slots) if (s) this.root.remove(s.object, s.tag);
+    for (const s of this.slots) if (s) this.root.remove(s.object, s.tag, s.hit, s.pad);
     const n = Math.max(1, items.length);
     const spacing = (CASE.w - 1.4) / n;
     this.slots = items.map((item, i) => {
@@ -243,8 +255,14 @@ export class Suitcase {
       object.userData.slot = i;
       const tag = priceTag(item.price === 0 ? t('shop.free') : `${item.price} $`, affordable(i));
       tag.position.set(home.x, CASE.h + 0.3, 1.9);
-      this.root.add(object, tag);
-      return { object, tag, home, fly: null, bornAt: this.clock };
+      const hit = new THREE.Mesh(new THREE.BoxGeometry(spacing * 0.94, 2.4, 4.4), HIT_MATERIAL);
+      hit.position.set(home.x, ITEM_Y + 0.4, 0.15);
+      hit.userData.slot = i;
+      const pad = new THREE.Mesh(new THREE.PlaneGeometry(spacing * 0.95, 2.2), PAD_MATERIAL.clone());
+      pad.rotation.x = -Math.PI / 2;
+      pad.position.set(home.x, ITEM_Y - 0.2, -0.3);
+      this.root.add(object, tag, hit, pad);
+      return { object, tag, home, fly: null, bornAt: this.clock, hit, pad };
     });
     if (this.bellTag.sprite) this.bell.remove(this.bellTag.sprite);
     this.bellTag.sprite = priceTag(`↻ ${rerollCost} $`, canReroll);
@@ -272,7 +290,7 @@ export class Suitcase {
   flyAway(index: number, to: THREE.Vector3, onArrive: () => void) {
     const slot = this.slots[index];
     if (!slot) return onArrive();
-    this.root.remove(slot.tag);
+    this.root.remove(slot.tag, slot.hit, slot.pad);
     const world = slot.object.getWorldPosition(new THREE.Vector3());
     this.root.remove(slot.object);
     this.scene.add(slot.object);
@@ -312,7 +330,7 @@ export class Suitcase {
   pick(raycaster: THREE.Raycaster): SuitcaseTarget {
     if (this.state !== 'open') return null;
     const objects: THREE.Object3D[] = [this.bell, this.lid];
-    for (const s of this.slots) if (s && !s.fly) objects.push(s.object);
+    for (const s of this.slots) if (s && !s.fly) objects.push(s.hit, s.object);
     const hit = raycaster.intersectObjects(objects, true)[0];
     if (!hit) return null;
     for (let o: THREE.Object3D | null = hit.object; o; o = o.parent) {
@@ -421,6 +439,8 @@ export class Suitcase {
   }
 
   private updateSlots(dt: number) {
+    this.lamp.position.copy(this.root.position).add(new THREE.Vector3(0, 2.8, 0.8));
+    this.lamp.intensity = this.root.visible ? 9 : 0;
     this.slots.forEach((s, i) => {
       if (!s) return;
       if (s.fly) {
@@ -440,6 +460,8 @@ export class Suitcase {
       const born = clamp01((this.clock - s.bornAt) / 0.4);
       const hovered = this.hovered?.kind === 'item' && this.hovered.index === i;
       const lift = hovered ? 0.35 : 0;
+      const padMat = s.pad.material as THREE.MeshBasicMaterial;
+      padMat.opacity += ((hovered ? 0.55 : 0) - padMat.opacity) * Math.min(1, dt * 12);
       s.object.position.set(s.home.x, s.home.y + lift + Math.sin(this.clock * 1.2 + i) * 0.04, s.home.z);
       s.object.rotation.y += dt * (hovered ? 1.4 : 0.25);
       s.object.scale.setScalar(ease(born) * (hovered ? 1.12 : 1) * (s.object.userData.baseScale ?? 1));

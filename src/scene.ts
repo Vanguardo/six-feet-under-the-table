@@ -33,6 +33,8 @@ export interface Stage {
   dust: THREE.Points;
   /** Multiplicateur de la lumière de l'ampoule (baisse à la mort). */
   lightLevel: { value: number };
+  /** Le reste de la cave qui vit : néon, lune, gouttes. */
+  animateDecor: (time: number) => void;
   /** Sursaut de l'ampoule sur un gros score : 0 = calme, 1 = elle s'emballe. Retombe toute seule. */
   flare: { value: number };
   feltColliders: Set<number>;
@@ -216,11 +218,15 @@ export function createStage(container: HTMLElement, world: RAPIER.World): Stage 
   plank.receiveShadow = true;
   scene.add(plank);
 
-  buildCellar(scene);
-  buildDecor(scene);
+  const neon = buildCellar(scene);
+  const decor = buildDecor(scene);
+  const animateDecor = (time: number) => {
+    neon(time);
+    decor(time);
+  };
   buildPaddedRail(scene, railX, railZ);
 
-  return { renderer, scene, camera, bulb, bulbMesh, lightCone, dust, lightLevel: { value: 1 }, flare: { value: 0 }, feltColliders, woodColliders };
+  return { renderer, scene, camera, bulb, bulbMesh, lightCone, dust, lightLevel: { value: 1 }, flare: { value: 0 }, animateDecor, feltColliders, woodColliders };
 }
 
 /**
@@ -279,7 +285,7 @@ function buildPaddedRail(scene: THREE.Scene, railX: number, railZ: number) {
  * La cave : briques humides et béton, à peine visibles dans la pénombre.
  * Un néon rouge au fond découpe la silhouette du créancier en contre-jour.
  */
-function buildCellar(scene: THREE.Scene) {
+function buildCellar(scene: THREE.Scene): (time: number) => void {
   const wall = (w: number, h: number, back = false) =>
     new THREE.MeshStandardMaterial({
       map: repeated(brickTexture(), w / 5, h / 5),
@@ -345,6 +351,19 @@ function buildCellar(scene: THREE.Scene) {
   );
   shadow.position.set(0.5, 5.5, -CELLAR.back + 2);
   scene.add(shadow);
+
+  // Le néon est mal fixé : il tient, puis bégaie, s'éteint une fraction de seconde, repart.
+  const neonMat = neon.material as THREE.MeshBasicMaterial;
+  const neonBase = neonMat.color.clone();
+  let stutterUntil = 0;
+  return (time: number) => {
+    if (time > stutterUntil && Math.random() < 0.004) stutterUntil = time + 0.15 + Math.random() * 0.5;
+    const off = time < stutterUntil && Math.sin(time * 60) > 0.1;
+    const level = off ? 0.12 : 0.92 + Math.sin(time * 7.3) * 0.04;
+    neonMat.color.copy(neonBase).multiplyScalar(level);
+    neonGlow.material.opacity = 0.7 * level;
+    glow.intensity = 45 * level;
+  };
 }
 
 let flickerUntil = 0;
@@ -379,5 +398,6 @@ export function animateBulb(stage: Stage, time: number): boolean {
     pos.setXYZ(i, pos.getX(i) + Math.sin(time * 0.3 + i) * 0.0015, y, pos.getZ(i) + Math.cos(time * 0.25 + i) * 0.0015);
   }
   pos.needsUpdate = true;
+  stage.animateDecor(time);
   return dark;
 }

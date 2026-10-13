@@ -40,6 +40,10 @@ import { CUP_INNER_RADIUS, CUP_WALL } from './config';
 /** Vitesse du gobelet au lâcher au-delà de laquelle un lancer compte comme violent. */
 const VIOLENT_THROW = 25;
 
+// Écran titre : la caméra glisse vers le créancier.
+const TITLE_LOOK = new THREE.Vector3(0, -0.6, -10);
+const TITLE_FROM = new THREE.Vector3(0, 4.6, 6.5);
+
 // Gros plan de la boutique : la valise en haut, le tapis de garde et le rebord en bas.
 const SHOP_LOOK = new THREE.Vector3(-0.5, 0.5, 3.4);
 const SHOP_FROM = new THREE.Vector3(-0.5, 11.5, 14.8);
@@ -69,7 +73,7 @@ export interface Fx {
   dim(level: number, instant?: boolean): void;
   pressure(level: number): void;
   eyes(lost: number): void;
-  lean(point: THREE.Vector3 | null, from?: THREE.Vector3): void;
+  lean(point: THREE.Vector3 | null, from?: THREE.Vector3, speed?: number): void;
 }
 
 interface Sequence {
@@ -241,6 +245,7 @@ export class Game {
       this.sfx.unlock();
       this.ambience.start();
       this.menu.title();
+      this.titleShot();
     });
   }
 
@@ -1404,10 +1409,16 @@ export class Game {
     this.panel.hide();
     this.suitcase.reset();
     this.pact.reset();
-    this.fx.lean(null);
     this.stage.lightLevel.value = 1;
     this.fx.dim(1);
+    this.creditor.showSmile(true);
     this.menu.title();
+    this.titleShot();
+  }
+
+  /** Écran titre : on s'avance lentement vers le sourire, au-dessus de la table vide. */
+  private titleShot() {
+    this.fx.lean(TITLE_LOOK, TITLE_FROM, 0.3);
   }
 
   /** Quitter la table en pleine run : elle compte comme perdue. */

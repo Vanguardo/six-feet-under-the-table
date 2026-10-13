@@ -8,6 +8,7 @@ export class CameraRig {
   /** Penché en avant (0 = assis, 1 = penché sur la cible). */
   private lean = 0;
   private leanTarget = 0;
+  private leanSpeed = 2.5;
   private readonly leanPosition = new THREE.Vector3();
   private readonly leanLook = new THREE.Vector3();
 
@@ -25,7 +26,8 @@ export class CameraRig {
   }
 
   /** Se pencher au-dessus d'un point de la table (lire le contrat), ou se rasseoir (`null`). */
-  leanOver(point: THREE.Vector3 | null, from?: THREE.Vector3) {
+  leanOver(point: THREE.Vector3 | null, from?: THREE.Vector3, speed = 2.5) {
+    this.leanSpeed = speed;
     if (!point) {
       this.leanTarget = 0;
       return;
@@ -39,7 +41,7 @@ export class CameraRig {
   update(time: number, dt: number) {
     if (this.frozen) return;
     this.shake = Math.max(0, this.shake - dt * 2.2);
-    this.lean += (this.leanTarget - this.lean) * (1 - Math.exp(-dt * 2.5));
+    this.lean += (this.leanTarget - this.lean) * (1 - Math.exp(-dt * this.leanSpeed));
     const k = this.lean * this.lean * (3 - 2 * this.lean);
     const breath = Math.sin(time * 1.4) * 0.06;
     const sway = Math.sin(time * 0.37) * 0.05;
