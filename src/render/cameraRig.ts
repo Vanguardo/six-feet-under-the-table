@@ -51,7 +51,7 @@ export class CameraRig {
     if (this.frozen) return;
     this.shake = Math.max(0, this.shake - dt * 2.2);
     if (this.fovKick !== 0 || this.camera.fov !== this.baseFov) {
-      this.fovKick *= Math.exp(-dt * 7);
+      this.fovKick *= Math.exp(-dt * 4.5);
       if (Math.abs(this.fovKick) < 0.01) this.fovKick = 0;
       this.camera.fov = this.baseFov + this.fovKick;
       this.camera.updateProjectionMatrix();

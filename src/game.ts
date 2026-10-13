@@ -488,8 +488,13 @@ export class Game {
 
   private onRollStart() {
     this.lastAction = this.clock;
-    this.fx.kick(-2.2);
-    this.fx.jolt(0.12);
+    // Le lancer se sent : le regard se resserre d'un coup, la table encaisse, l'air siffle.
+    // Plus le geste est violent, plus tout est fort.
+    const force = Math.min(1, this.table.lastThrowSpeed / 28);
+    this.fx.kick(-(5 + force * 6));
+    this.fx.jolt(0.4 + force * 0.45);
+    this.fx.aberration(0.004 + force * 0.006);
+    this.sfx.burst({ type: 'bandpass', freq: 500, freqEnd: 2200, q: 1.2, duration: 0.22, volume: 0.25 + force * 0.35 });
     this.deadline = null;
     this.rollsThisHand++;
     if (this.rollsThisHand > 1) {
