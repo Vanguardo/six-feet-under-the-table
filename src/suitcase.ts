@@ -7,6 +7,7 @@ import { buildRelicMesh } from './relicShelf';
 import { t } from './i18n';
 import { comboName } from './i18n/names';
 import { DIE_TYPES, FACE_MODS } from './rules/dice';
+import { buildVialMesh } from './vialRack';
 import type { ShopItem } from './rules/run';
 import type { Sfx } from './sfx';
 
@@ -123,6 +124,11 @@ function itemMesh(item: ShopItem): THREE.Object3D {
     case 'burin': {
       const o = chisel(FACE_MODS[item.mod].color);
       o.userData.baseScale = 1.6;
+      return o;
+    }
+    case 'fiole': {
+      const o = buildVialMesh(item.vial);
+      o.userData.baseScale = 1.5;
       return o;
     }
   }

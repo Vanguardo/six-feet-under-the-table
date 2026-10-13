@@ -9,12 +9,14 @@ import { CHIPS_COLOR, COIN_COLOR, FloatTexts, MULT_COLOR, XMULT_COLOR } from './
 import { Hud, ticketLines } from './hud';
 import { fmtNum, plural, setLang, t } from './i18n';
 import { bossName, bossRule, comboName, dieDesc, dieName, modName, partEffect, partName, rarityName, relicDesc, relicName } from './i18n/names';
-import { Menu } from './menu';
+import { Menu, type RunSummary } from './menu';
 import { MousePrompt } from './mousePrompt';
 import { PlayerHands } from './playerHands';
 import { Printer } from './printer';
 import { CoinShower } from './coinShower';
-import type { Progress } from './progress';
+import { VialRack } from './vialRack';
+import { VIALS } from './rules/vials';
+import { Progress } from './progress';
 import { PactScene } from './pact';
 import { Particles } from './render/particles';
 import { ps1ify } from './render/ps1';
@@ -91,6 +93,14 @@ export class Game {
   private introAt = 0;
   private introStage = 0;
   private pactSkippable = false;
+  /** Pour le bilan de fin : total payé et meilleure main de la run. */
+  private runPaid = 0;
+  private runHands = 0;
+  private bestHand: { name: string; score: number } | null = null;
+  /** Dernier appui : sur un écran tactile, il n'y a pas de survol pour lire les infobulles. */
+  private lastTap = { x: 0, y: 0, touch: false };
+  /** Article de la valise montré au premier toucher ; un second toucher l'achète. */
+  private touchArmed: string | null = null;
   private handsShown = true;
   /** Actions différées (mise en scène), annulées à chaque nouvelle run. */
   private timers: { at: number; fn: () => void }[] = [];
@@ -101,9 +111,18 @@ export class Game {
   private readonly floats: FloatTexts;
   private readonly suitcase: Suitcase;
   private readonly mousePrompt: MousePrompt;
+  private readonly cigSmoke: Particles;
+  private readonly cigTip = new THREE.Vector3(-6.0, 1.12, -9.3);
+  private nextPuff = 0;
   private readonly hands: PlayerHands;
   private readonly printer: Printer;
   private readonly coinShower: CoinShower;
+  private readonly vialRack: VialRack;
+  /** Laudanum bu : la prochaine main jouée compte ×2. */
+  private laudanum = false;
+  /** Encre de seiche débouchée : le prochain dé cliqué sera retourné. */
+  private inking = -1;
+  private hoveredVial = -1;
   /** Pièces gagnées mais encore en vol : la pile ne les montre qu'une fois rangées. */
   private coinsPending = 0;
   /** Mains jouées dans l'échéance, imprimées à la suite sur le ticket. */
@@ -128,6 +147,8 @@ export class Game {
   private syringeUsed = false;
   /** Gobelet fêlé : dés qui valent +1 jusqu'à leur prochaine relance. */
   private readonly cracked = new Set<number>();
+  /** Faces œil déjà ouvertes pendant cette main : chacune ne donne sa relance qu'une fois. */
+  private readonly eyesOpened = new Set<number>();
   private result: BestResult | null = null;
   private previousResult: BestResult | null = null;
   private revealed = false;
@@ -157,6 +178,9 @@ export class Game {
     // Fumée de feutre : grosse, floue, lente, qui monte à peine.
     this.smoke = new Particles(stage.scene, { max: 320, life: [1.1, 2.0], size: [0.45, 2.4], alpha: 0.14, gravity: 0.3, drag: 2, softness: 1 });
     // Copeaux de bois (et éclats de verre) : petits, nets, qui retombent.
+    // La cigarette du créancier : une fumée lente qui monte dans le faisceau et s'y enroule.
+    this.cigSmoke = new Particles(stage.scene, { max: 160, life: [3.5, 5.5], size: [0.25, 3.2], alpha: 0.1, gravity: 0.55, drag: 0.6, softness: 1 });
+    this.buildAshtray(stage.scene);
     this.chips = new Particles(stage.scene, { max: 360, life: [0.7, 1.4], size: [0.16, 0.1], alpha: 0.95, gravity: -16, drag: 0.8, softness: 0.25 });
     this.table = new DiceTable(
       stage,
@@ -196,9 +220,11 @@ export class Game {
     this.hands = new PlayerHands(stage.scene);
     this.printer = new Printer(stage.scene, sfx);
     this.coinShower = new CoinShower(world, stage.scene, sfx);
+    this.vialRack = new VialRack(this.printer.root);
     this.bindInput(stage.renderer.domElement);
     this.menu = new Menu(progress, {
       play: (cup, stake) => this.startRun({ cup, stake }),
+      daily: () => this.startRun({ cup: 'cuir', stake: 0, seed: Progress.dailySeed(), daily: true }),
       tutorial: () => this.startTutorial(),
       settings: () => this.applySettings(),
     });
@@ -249,7 +275,7 @@ export class Game {
         e.preventDefault();
         if (!e.repeat) this.holdTicket(true);
       } else if (e.code === 'KeyR' && !e.ctrlKey && !e.metaKey && this.phase === 'over') {
-        this.startRun({ cup: this.lastOptions.cup, stake: this.lastOptions.stake });
+        this.startRun(this.lastOptions.daily ? { ...this.lastOptions } : { cup: this.lastOptions.cup, stake: this.lastOptions.stake });
       } else if (/^Digit[1-6]$/.test(e.code)) {
         // Les chiffres suivent les dés en jeu, dans l'ordre.
         const active = this.run.activeDice();
@@ -259,9 +285,45 @@ export class Game {
     });
     // Infobulles : reliques sur le rebord, dés sur la table. La table met le rayon à jour juste avant.
     canvas.addEventListener('pointerdown', (e) => {
+      this.lastTap = { x: e.clientX, y: e.clientY, touch: e.pointerType === 'touch' };
       if (e.button === 2) return this.holdTicket(true);
+      // Au toucher, une relique du rebord se lit d'un appui (hors boutique, où elle ouvre son menu).
+      if (this.lastTap.touch && this.phase !== 'shop') {
+        const relic = this.run.relics[this.shelf.pick(this.table.raycaster)];
+        if (relic) {
+          const status = relic.def.status ? `<br><b>${relic.def.status(relic.state)}</b>` : '';
+          this.hud.showTooltip(`<b>${relicName(relic.def)}</b> · ${rarityName(relic.def.rarity)}<br>${relicDesc(relic.def)}${status}`, e.clientX, e.clientY, true);
+          return;
+        }
+        this.hud.hideTooltip();
+      }
       // Un clic pendant le gros plan automatique : on se rassoit tout de suite.
       if (this.ticketZoom === 'auto') return this.endTicketZoom();
+      // Encre débouchée : le dé cliqué se retourne.
+      if (this.inking >= 0 && this.phase === 'play') {
+        const die = this.table.pickDie();
+        if (die >= 0 && !this.dice[die].kept) this.pourInk(die);
+        else {
+          this.inking = -1;
+          this.showFlash(t('flash.inkCancel'));
+        }
+        return;
+      }
+      // Une fiole sur la caisse.
+      if (this.phase === 'play') {
+        const v = this.vialRack.pick(this.table.raycaster);
+        if (v >= 0) return this.useVial(v);
+      }
+      // Au toucher (ni Tab ni clic droit) : un appui sur le ticket le lit de près, un second joue la main.
+      if (this.lastTap.touch && this.phase === 'play') {
+        const onTicket = this.printer.pick(this.table.raycaster);
+        if (this.ticketZoom === 'held') {
+          this.holdTicket(false);
+          if (onTicket && this.canValidate()) this.validate();
+          return;
+        }
+        if (onTicket) return this.holdTicket(true);
+      }
       // Valider la main : un clic sur le ticket (ou Espace).
       if (this.phase === 'play' && this.printer.pick(this.table.raycaster) && this.canValidate()) return this.validate();
       if (this.phase === 'shop') this.shopClick();
@@ -270,6 +332,13 @@ export class Game {
     });
     canvas.addEventListener('pointermove', (e) => {
       if (this.table.holding) return this.hud.hideTooltip();
+      const vial = this.phase === 'play' || this.phase === 'shop' ? this.vialRack.pick(this.table.raycaster) : -1;
+      this.hoveredVial = vial;
+      if (vial >= 0) {
+        const id = this.run.vials[vial];
+        canvas.style.cursor = this.phase === 'play' ? 'pointer' : 'default';
+        return this.hud.showTooltip(`<b>${t(`vial.${id}.name`, {}, VIALS[id].name)}</b><br>${t(`vial.${id}.desc`, {}, VIALS[id].description)}<br><i>${t('tip.vialUse')}</i>`, e.clientX, e.clientY);
+      }
       if (this.phase === 'play' && this.printer.pick(this.table.raycaster)) {
         canvas.style.cursor = this.canValidate() ? 'pointer' : 'default';
         return this.hud.showTooltip(this.canValidate() ? t('ticket.validate') : t('ticket.read'), e.clientX, e.clientY);
@@ -332,10 +401,26 @@ export class Game {
 
   /** Faces visibles des dés en jeu, avec leur vraie valeur et leur gravure. */
   private faces(): Face[] {
-    return this.table.faces().map(({ die, face }) => {
+    const faces = this.table.faces().map(({ die, face }) => {
       const f = faceOf(this.run.dice[die], face, die);
       if (!this.cracked.has(die) || f.value === 0) return f;
       return { ...f, value: Math.min(f.value + 1, Math.max(...DIE_TYPES[this.run.dice[die].type].faces)) };
+    });
+    // Face jumelle : elle prend la valeur du dé posé le plus près d'elle.
+    return faces.map((f) => {
+      if (f.mod !== 'jumelle') return f;
+      const here = this.dice[f.die].mesh.position;
+      let best: Face | null = null;
+      let bestD = Infinity;
+      for (const o of faces) {
+        if (o === f || o.mod === 'jumelle') continue;
+        const d = this.dice[o.die].mesh.position.distanceTo(here);
+        if (d < bestD) {
+          bestD = d;
+          best = o;
+        }
+      }
+      return best ? { ...f, value: best.value } : f;
     });
   }
 
@@ -409,6 +494,14 @@ export class Game {
       }
     }
     const faces = this.faces();
+    // Face œil : elle te regarde, et t'accorde une relance de plus pour la main.
+    for (const f of faces) {
+      if (f.mod !== 'oeil' || this.eyesOpened.has(f.die)) continue;
+      this.eyesOpened.add(f.die);
+      this.run.rerolls++;
+      this.showFlash(t('flash.eye'));
+      this.floats.spawn('+1', CHIPS_COLOR, this.dice[f.die].mesh.position.clone().add(new THREE.Vector3(0, 1, 0)), this.clock);
+    }
     // Tutoriel : le créancier tapote les dés qui méritent d'être gardés.
     if (this.run.tutorial && this.rollsThisHand === 1 && this.run.handsPlayed === 0 && this.run.echeance === 0) {
       const byValue = new Map<number, number[]>();
@@ -486,6 +579,7 @@ export class Game {
       onlyPairs: this.run.bossIs('comptable'),
       halved: this.run.bossIs('jumeau') && this.run.played.includes(result.combo.id),
       leech: this.run.bossIs('sangsue'),
+      laudanum: this.laudanum,
     });
     this.phase = 'scoring';
     this.result = result;
@@ -510,6 +604,24 @@ export class Game {
       this.hud.setTallyTotal(seq.breakdown.total);
       this.sfx.tone(SCORE_BASE_HZ * 2, 0.5, 0.25, 'square');
       this.sfx.tone(SCORE_BASE_HZ * 3, 0.5, 0.15);
+      // Une main qui pèse : l'ampoule s'emballe, l'or jaillit des dés qui ont marqué.
+      const weight = Math.min(1, seq.breakdown.total / Math.max(1, this.run.target - this.run.score));
+      if (weight > 0.35) {
+        this.stage.flare.value = Math.max(this.stage.flare.value, weight);
+        this.fx.jolt(0.25 + weight * 0.4);
+        this.fx.aberration(0.003 * weight);
+        for (const k of seq.breakdown.steps.filter((st) => st.kind === 'die').map((st) => st.die!)) {
+          const at = this.dice[seq.faces[k].die].mesh.position;
+          for (let i = 0; i < 6 + Math.round(weight * 10); i++) {
+            this.chips.emit({
+              position: at.clone().add(new THREE.Vector3(0, 0.5, 0)),
+              velocity: new THREE.Vector3((Math.random() - 0.5) * 5, 3 + Math.random() * 5, (Math.random() - 0.5) * 5),
+              color: new THREE.Color(1, 0.75 + Math.random() * 0.2, 0.25),
+              scale: 0.4 + Math.random() * 0.5,
+            });
+          }
+        }
+      }
       seq.endAt = this.clock + 1.0;
     }
     if (seq.endAt > 0 && this.clock >= seq.endAt) this.finishScoring(seq);
@@ -552,6 +664,10 @@ export class Game {
     this.hud.hideTally();
     this.run.score += breakdown.total;
     this.ticketLog.push({ name: comboName(result.combo.id), gain: breakdown.total });
+    this.runPaid += breakdown.total;
+    this.laudanum = false;
+    this.runHands++;
+    if (!this.bestHand || breakdown.total > this.bestHand.score) this.bestHand = { name: comboName(result.combo.id), score: breakdown.total };
     this.run.hands--;
     this.run.handsPlayed++;
     this.run.addBleed(breakdown.bled);
@@ -576,6 +692,7 @@ export class Game {
     this.freeRerollUsed = false;
     this.syringeUsed = false;
     this.cracked.clear();
+    this.eyesOpened.clear();
     this.result = null;
     this.previousResult = null;
     this.revealed = false;
@@ -625,6 +742,7 @@ export class Game {
       this.creditor.tearContract(() => {
         this.creditor.vanish();
         this.hud.showBanner(t('banner.win'), t('banner.winSub'));
+        this.later(3.5, () => this.showSummary(true, t('summary.causeWin')));
         this.sfx.tone(SCORE_BASE_HZ, 1.2, 0.3);
       });
       return;
@@ -745,6 +863,106 @@ export class Game {
     this.openShop();
   }
 
+  /** Boire (ou verser) une fiole. Seulement pendant une main, gobelet posé. */
+  private useVial(index: number) {
+    const id = this.run.vials[index];
+    if (!id || !this.table.idle) return this.sfx.tone(140, 0.2, 0.2, 'square');
+    if (id === 'encre') {
+      if (this.rollsThisHand === 0) return this.showFlash(t('flash.inkNeedDice'));
+      this.inking = index;
+      this.showFlash(t('flash.inkPick'));
+      return;
+    }
+    this.consumeVial(index);
+    if (id === 'sang') {
+      this.run.rerolls += 2;
+      this.showFlash(t('flash.vialBlood'));
+    } else if (id === 'laudanum') {
+      this.laudanum = true;
+      this.showFlash(t('flash.vialLaudanum'));
+      this.fx.aberration(0.01);
+    }
+  }
+
+  /** La fiole est vidée : un glouglou, un hoquet de verre, elle disparaît de la caisse. */
+  private consumeVial(index: number) {
+    this.run.vials.splice(index, 1);
+    this.vialRack.sync(this.run.vials);
+    this.sfx.burst({ type: 'bandpass', freq: 500, freqEnd: 260, q: 4, duration: 0.5, volume: 0.6 });
+    this.sfx.tone(900, 0.06, 0.12, 'triangle');
+  }
+
+  /** L'encre noircit le dé et le retourne sur sa face opposée. */
+  private pourInk(die: number) {
+    const index = this.inking;
+    this.inking = -1;
+    this.consumeVial(index);
+    const current = this.table.faces().find((f) => f.die === die);
+    if (!current) return;
+    this.table.flip(die, 5 - current.face);
+    for (let i = 0; i < 12; i++) {
+      this.smoke.emit({
+        position: this.dice[die].mesh.position.clone(),
+        velocity: new THREE.Vector3((Math.random() - 0.5) * 1.5, 0.6 + Math.random(), (Math.random() - 0.5) * 1.5),
+        color: new THREE.Color(0.05, 0.06, 0.1),
+        scale: 0.6,
+      });
+    }
+    this.showFlash(t('flash.vialInk'));
+    // Une fois le dé reposé, on relit la table.
+    this.later(0.9, () => {
+      if (this.phase !== 'play') return;
+      const faces = this.faces();
+      const result = this.evaluate(faces);
+      this.result = result;
+      const valueOf = new Map(faces.map((f, k) => [f.die, result.values[k]]));
+      this.table.startReveal(result.scoring.map((k) => faces[k].die), (d) => valueOf.get(d) ?? 0, this.hidden());
+      if (!this.hidden()) this.hud.popCombo(result);
+    });
+  }
+
+  /** Un cendrier en fer-blanc sur la planche du créancier, une cigarette qui se consume. */
+  private buildAshtray(scene: THREE.Scene) {
+    const tin = new THREE.MeshStandardMaterial({ color: 0x6a6460, metalness: 0.7, roughness: 0.45 });
+    const tray = new THREE.Mesh(new THREE.CylinderGeometry(0.62, 0.52, 0.18, 14), tin);
+    tray.position.set(-6.2, 0.89, -9.4);
+    const ash = new THREE.Mesh(new THREE.CylinderGeometry(0.5, 0.5, 0.02, 12), new THREE.MeshStandardMaterial({ color: 0x3a3632, roughness: 1 }));
+    ash.position.set(-6.2, 0.97, -9.4);
+    const paper = new THREE.Mesh(new THREE.CylinderGeometry(0.045, 0.045, 0.7, 6), new THREE.MeshStandardMaterial({ color: 0xe8e2d4, roughness: 0.8 }));
+    paper.rotation.z = Math.PI / 2 - 0.15;
+    paper.rotation.y = 0.5;
+    paper.position.set(-6.25, 1.06, -9.37);
+    const ember = new THREE.Mesh(new THREE.SphereGeometry(0.06, 6, 4), new THREE.MeshBasicMaterial({ color: 0xff5a10 }));
+    ember.position.copy(this.cigTip).add(new THREE.Vector3(0, -0.06, 0));
+    const glow = new THREE.PointLight(0xff5010, 1.2, 1.6, 2);
+    glow.position.copy(this.cigTip);
+    for (const m of [tray, ash, paper]) m.castShadow = m.receiveShadow = true;
+    scene.add(tray, ash, paper, ember, glow);
+  }
+
+  /** Le relevé de fin de run, par-dessus la table assombrie. */
+  private showSummary(won: boolean, cause: string) {
+    if (this.phase !== 'over') return;
+    this.hud.hideBanner();
+    const r = this.run;
+    if (r.daily) {
+      const rank = won ? 999 : r.night * 3 + r.echeance;
+      this.progress.recordDaily(rank, won ? t('summary.won') : r.isBoss ? t('where.boss', { n: r.night }) : t('where.echeance', { n: r.night, e: r.echeance + 1 }));
+    }
+    const s: RunSummary = {
+      won,
+      cause,
+      reached: r.isBoss ? t('where.boss', { n: r.night }) : t('where.echeance', { n: r.night, e: r.echeance + 1 }),
+      paid: fmt(this.runPaid),
+      best: this.bestHand ? `${this.bestHand.name} · ${fmt(this.bestHand.score)}` : '—',
+      hands: this.runHands,
+      pacts: r.body.pacts,
+      lost: bodySummary(r),
+      relics: r.relics.map((x) => relicName(x.def)).join(', '),
+    };
+    this.menu.summary(s, () => this.startRun(this.lastOptions.daily ? { ...this.lastOptions } : { cup: this.lastOptions.cup, stake: this.lastOptions.stake }), () => this.openMenu());
+  }
+
   /** Le cœur a été donné et la nuit s'achève : la run s'arrête là. */
   private heartGiven() {
     if (!(this.run.lastNight === this.run.night && this.run.isBoss)) return false;
@@ -753,6 +971,7 @@ export class Game {
     this.stage.lightLevel.value = 0.3;
     this.fx.dim(0.45);
     this.hud.showBanner(t('banner.heart'), t('banner.heartSub', { n: this.run.night }));
+    this.later(4, () => this.showSummary(false, t('summary.causeHeart')));
     [0, 1.2, 2.8].forEach((d) => this.sfx.toneAt(d, 58, 36, 0.18, 0.7));
     return true;
   }
@@ -788,6 +1007,7 @@ export class Game {
         this.creditor.showSmile(true);
         this.fx.dim(0.55);
         this.hud.showBanner(t('banner.death'), t('banner.deathSub', { where, score: fmt(score), target: fmt(target) }));
+        this.later(3.2, () => this.showSummary(false, t('summary.causeDeath', { where })));
       });
     });
   }
@@ -866,7 +1086,25 @@ export class Game {
     const relic = this.shelf.pick(ray);
     if (relic >= 0) return this.openRelicMenu(relic);
     const target = this.suitcase.pick(ray);
-    if (!target) return;
+    if (!target) {
+      this.touchArmed = null;
+      this.hud.hideTooltip();
+      return;
+    }
+    // Écran tactile : le premier appui montre ce que fait l'article, le second l'achète.
+    if (this.lastTap.touch && target.kind !== 'lid') {
+      const key = target.kind === 'item' ? `item:${target.index}` : target.kind;
+      if (this.touchArmed !== key) {
+        this.touchArmed = key;
+        this.suitcase.hover(target);
+        const item = target.kind === 'item' ? this.run.shop[target.index] : null;
+        const html = item ? itemTooltip(item) : t('shop.bell', { n: this.run.rerollCost });
+        this.hud.showTooltip(`${html}<br><i>${t('shop.tapAgain')}</i>`, this.lastTap.x, this.lastTap.y, true);
+        return;
+      }
+    }
+    this.touchArmed = null;
+    this.hud.hideTooltip();
     if (target.kind === 'bell') {
       if (!this.run.rerollShop()) return this.sfx.tone(140, 0.2, 0.2, 'square');
       this.suitcase.ring();
@@ -913,10 +1151,12 @@ export class Game {
     this.sfx.tone(COIN_HZ * 1.26, 0.18, 0.2, 'square');
     let to: THREE.Vector3;
     if (item.kind === 'relic') to = this.shelf.position(this.run.relics.length - 1).add(new THREE.Vector3(0, 0.4, 0));
+    else if (item.kind === 'fiole') to = this.printer.root.localToWorld(new THREE.Vector3(1.15, 0.5, 2.0 + (this.run.vials.length - 1) * 1.0));
     else if (item.kind === 'gravure') to = new THREE.Vector3(0, 1.8, -8.2);
     else to = this.dice[die].mesh.position.clone();
     this.suitcase.flyAway(index, to, () => {
       if (item.kind === 'relic') this.shelf.sync(this.run.relics);
+      else if (item.kind === 'fiole') this.vialRack.sync(this.run.vials);
       else if (item.kind === 'gravure') this.showFlash(t('flash.levelUp', { name: comboName(item.combo), n: this.run.levels[item.combo] ?? 1 }));
       else {
         this.syncDice(false);
@@ -1003,6 +1243,9 @@ export class Game {
     this.lastOptions = o;
     this.menu.hide();
     this.timers = [];
+    this.runPaid = 0;
+    this.runHands = 0;
+    this.bestHand = null;
     this.cup.mesh.visible = true;
     document.body.classList.remove('in-intro');
     this.run = new RunState({ ...o, unlocked: this.progress.unlockedRelics() });
@@ -1012,6 +1255,7 @@ export class Game {
     this.freeRerollUsed = false;
     this.syringeUsed = false;
     this.cracked.clear();
+    this.eyesOpened.clear();
     this.result = null;
     this.previousResult = null;
     this.revealed = false;
@@ -1030,6 +1274,9 @@ export class Game {
     this.printer.reset();
     this.coinShower.clear();
     this.coinsPending = 0;
+    this.laudanum = false;
+    this.inking = -1;
+    this.vialRack.sync([]);
     this.table.reset();
     this.creditor.reset();
     this.cup.setTint(CUPS.find((c) => c.id === this.run.cup)?.tint ?? 0xffffff);
@@ -1199,6 +1446,7 @@ export class Game {
     this.hands.setLight(this.stage.lightLevel.value);
     this.printer.update(dt);
     this.coinShower.update(dt);
+    this.vialRack.update(dt, this.hoveredVial);
     this.printer.setLight(this.stage.lightLevel.value);
     this.shelf.setLight(this.stage.lightLevel.value);
     if (this.phase === 'scoring') this.stepScoring();
@@ -1238,6 +1486,17 @@ export class Game {
     const cupHome = this.phase !== 'intro' && this.cup.position.z > 4;
     this.hands.update(dt, this.clock, cupHome ? { position: this.cup.position, quaternion: this.cup.quaternion } : null, this.table.holding);
     this.smoke.update(dt);
+    // Volutes : une bouffée de temps en temps, qui dérive avec l'air de la cave.
+    if (this.clock >= this.nextPuff) {
+      this.nextPuff = this.clock + 0.12 + Math.random() * 0.12;
+      const drift = Math.sin(this.clock * 0.4) * 0.25;
+      this.cigSmoke.emit({
+        position: this.cigTip.clone(),
+        velocity: new THREE.Vector3(drift + (Math.random() - 0.5) * 0.12, 0.45 + Math.random() * 0.2, 0.08 + (Math.random() - 0.5) * 0.1),
+        color: new THREE.Color(0.78, 0.74, 0.68),
+      });
+    }
+    this.cigSmoke.update(dt);
     this.chips.update(dt);
     this.ambience.update(dt);
     this.fx.pressure(this.pressure());

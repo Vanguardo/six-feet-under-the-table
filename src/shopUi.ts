@@ -1,3 +1,4 @@
+import { VIALS } from './rules/vials';
 import { t } from './i18n';
 import { comboName, dieDesc, dieName, modDesc, modName, rarityName, relicDesc, relicName } from './i18n/names';
 import { comboStats, LEVEL_GAIN, type ComboId } from './rules/combos';
@@ -115,6 +116,8 @@ export function itemTooltip(item: ShopItem): string {
       });
     case 'burin':
       return t('tip.burin', { name: modName(item.mod), desc: modDesc(item.mod), price: item.price });
+    case 'fiole':
+      return `<b>${t(`vial.${item.vial}.name`, {}, VIALS[item.vial].name)}</b><br>${t(`vial.${item.vial}.desc`, {}, VIALS[item.vial].description)}<br><i>${t('tip.vialUse')}</i><br><b>${item.price} $</b>`;
   }
 }
 

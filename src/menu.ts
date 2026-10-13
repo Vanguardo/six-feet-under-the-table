@@ -5,9 +5,23 @@ import type { BodyPartId } from './rules/body';
 import { MAX_STAKE, type CupId } from './rules/cups';
 import { RELICS } from './rules/relics';
 
+export interface RunSummary {
+  won: boolean;
+  cause: string;
+  reached: string;
+  paid: string;
+  best: string;
+  hands: number;
+  pacts: number;
+  lost: string;
+  relics: string;
+}
+
 export interface MenuActions {
   play(cup: CupId, stake: number): void;
   tutorial(): void;
+  /** Table du jour : graine fixe, gobelet de cuir, sans intérêts. */
+  daily(): void;
   /** Les réglages ont changé (langue, volume, gore). */
   settings(): void;
 }
@@ -99,6 +113,7 @@ export class Menu {
        <div class="subtitle">${t('menu.subtitle')}</div>
        <div class="buttons">
          <button class="primary" data-action="play">${t('menu.play')}</button>
+         ${this.progress.tutorialDone ? `<button data-action="daily">${t('menu.daily')}${this.dailyBest()}</button>` : ''}
          <button data-action="collection">${t('menu.collection')}</button>
          <button data-action="registry">${t('menu.registry')}</button>
          <button data-action="settings">${t('menu.settings')}</button>
@@ -106,11 +121,18 @@ export class Menu {
        <div class="small">${t('menu.demo')}</div>`,
       {
         play: () => (this.progress.tutorialDone ? this.cups() : this.actions.tutorial()),
+        daily: () => this.actions.daily(),
         collection: () => this.collection(),
         registry: () => this.registry(),
         settings: () => this.settings(() => this.title()),
       },
     );
+  }
+
+  private dailyBest() {
+    const d = this.progress.daily;
+    if (!d || !d.best) return '';
+    return ` <small>· ${t('menu.dailyBest', { best: d.best.split('|')[1] })}</small>`;
   }
 
   /** Choix du gobelet de départ et du niveau d'intérêts. */
@@ -238,6 +260,29 @@ export class Menu {
         },
         back,
       },
+    );
+  }
+
+  /** Le bilan de la run : imprimé comme un relevé de compte, à la fin. */
+  summary(s: RunSummary, again: () => void, toMenu: () => void) {
+    const line = (k: string, v: string) => `<div class="line"><span>${k}</span><b>${v}</b></div>`;
+    this.show(
+      `<div class="summary">
+         <h2>${s.won ? t('summary.won') : t('summary.lost')}</h2>
+         <div class="cause">${s.cause}</div>
+         ${line(t('summary.reached'), s.reached)}
+         ${line(t('summary.paid'), s.paid)}
+         ${line(t('summary.best'), s.best)}
+         ${line(t('summary.hands'), String(s.hands))}
+         ${line(t('summary.pacts'), String(s.pacts))}
+         ${line(t('summary.lostParts'), s.lost || '—')}
+         <div class="relics-list">${t('summary.relics')} ${s.relics || '—'}</div>
+       </div>
+       <div class="row">
+         <button class="primary" data-action="again">${t('summary.again')}</button>
+         <button data-action="menu">${t('summary.menu')}</button>
+       </div>`,
+      { again: () => again(), menu: () => toMenu() },
     );
   }
 

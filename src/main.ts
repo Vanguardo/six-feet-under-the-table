@@ -74,6 +74,21 @@ if (import.meta.env.DEV) {
   });
   const { createBot } = await import('./dev/bot');
   Object.assign(window, { bot: createBot(game, simulate, renderOnce) });
+  // Débogage visuel : une table en cours de partie, dés lancés, prête à être capturée.
+  Object.assign(window, {
+    devScene: async (roll = true) => {
+      (document.querySelector('#menu [data-action="accept"]') as HTMLElement | null)?.click();
+      const g = game as unknown as { startRun(o: object): void; endTicketZoom(): void };
+      g.startRun({ cup: 'cuir', stake: 0 });
+      g.endTicketZoom();
+      simulate(2.5);
+      if (roll) (window as unknown as { bot: { roll(): void } }).bot.roll();
+      simulate(1);
+      for (let i = 0; i < 20; i++) game!.render();
+      renderOnce();
+      renderOnce();
+    },
+  });
 }
 
 function simulate(seconds: number) {

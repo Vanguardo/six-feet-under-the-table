@@ -147,11 +147,16 @@ export class Hud {
     el.classList.add('bump');
   }
 
-  showTooltip(html: string, x: number, y: number) {
+  /** `above` : au toucher, l'infobulle passe au-dessus du doigt qui cacherait le texte. */
+  showTooltip(html: string, x: number, y: number, above = false) {
     this.tooltip.innerHTML = html;
-    this.tooltip.style.left = `${x + 16}px`;
-    this.tooltip.style.top = `${y + 16}px`;
     this.tooltip.classList.add('show');
+    const w = this.tooltip.offsetWidth;
+    const h = this.tooltip.offsetHeight;
+    const left = Math.min(Math.max(8, above ? x - w / 2 : x + 16), window.innerWidth - w - 8);
+    const top = above ? y - h - 28 : y + 16;
+    this.tooltip.style.left = `${left}px`;
+    this.tooltip.style.top = `${Math.min(Math.max(8, top), window.innerHeight - h - 8)}px`;
   }
 
   hideTooltip() {

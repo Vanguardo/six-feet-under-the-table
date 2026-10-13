@@ -16,6 +16,7 @@ const CrtShader = {
     uCurvature: { value: 0.06 },
     uDim: { value: 1 },
     uEyes: { value: 0 },
+    uGrade: { value: 1 },
   },
   vertexShader: /* glsl */ `
     varying vec2 vUv;
@@ -33,6 +34,7 @@ const CrtShader = {
     uniform float uCurvature;
     uniform float uDim;
     uniform float uEyes;
+    uniform float uGrade;
     varying vec2 vUv;
 
     float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
@@ -82,8 +84,20 @@ const CrtShader = {
       float mask = mod(gl_FragCoord.x, 3.0);
       col *= mask < 1.0 ? vec3(1.06, 0.96, 0.96) : mask < 2.0 ? vec3(0.96, 1.06, 0.96) : vec3(0.96, 0.96, 1.06);
 
-      // Vignette.
-      col *= smoothstep(1.35, 0.35, length(c));
+      // Étalonnage : ombres tirées vers le vert-de-gris, hautes lumières vers l'ambre,
+      // un peu de contraste en S. Le noir reste noir, la lumière de l'ampoule devient dorée.
+      float l = dot(col, vec3(0.299, 0.587, 0.114));
+      vec3 shadowTint = vec3(0.86, 1.0, 0.97);
+      vec3 lightTint = vec3(1.08, 0.98, 0.84);
+      vec3 graded = col * mix(shadowTint, lightTint, smoothstep(0.05, 0.6, l));
+      graded = mix(vec3(l), graded, 1.12);
+      graded = graded * graded * (3.0 - 2.0 * graded) * 0.35 + graded * 0.65;
+      graded += vec3(0.006, 0.009, 0.008);
+      col = mix(col, graded, uGrade);
+
+      // Vignette ovale, plus marquée dans les coins.
+      vec2 v = c * vec2(0.92, 1.08);
+      col *= smoothstep(1.42, 0.3, length(v));
       col *= uDim;
 
       // Un œil en moins : la moitié gauche du monde disparaît, bord flou et irrégulier.
@@ -116,7 +130,7 @@ export class PostFx {
   constructor(renderer: THREE.WebGLRenderer, scene: THREE.Scene, camera: THREE.Camera) {
     this.composer = new EffectComposer(renderer);
     this.composer.addPass(new RenderPass(scene, camera));
-    this.composer.addPass(new UnrealBloomPass(new THREE.Vector2(256, 256), 0.6, 0.45, 0.93));
+    this.composer.addPass(new UnrealBloomPass(new THREE.Vector2(256, 256), 0.75, 0.6, 0.88));
     this.composer.addPass(new OutputPass());
     this.crt = new ShaderPass(CrtShader);
     this.composer.addPass(this.crt);

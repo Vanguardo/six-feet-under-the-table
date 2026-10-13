@@ -44,6 +44,8 @@ export interface ScoringOptions {
   halved: boolean;
   /** La Sangsue : les faces dorées coûtent au lieu de rapporter. */
   leech: boolean;
+  /** Laudanum bu avant la main : ×2 mult. */
+  laudanum?: boolean;
 }
 
 /**
@@ -68,6 +70,7 @@ export function scoreHand(faces: Face[], result: ComboResult, relics: OwnedRelic
   };
 
   if (o.curse > 1) apply('curse', { xmult: o.curse }, { label: 'curse' });
+  if (o.laudanum) apply('curse', { xmult: 2 }, { label: 'laudanum' });
 
   const active = relics.map((r, i) => (o.disabledRelics.has(i) ? null : r));
 

@@ -10,9 +10,11 @@ import {
   TABLE_HALF_W,
   WALL_HEIGHT,
 } from './config';
-import { brickTexture, feltTexture, floorTexture, grimeTexture, repeated, woodTexture } from './render/textures';
+import { buildDecor } from './render/decor';
+import { glowTexture, volumeMaterial } from './render/volume';
+import { brickTexture, feltTexture, floorTexture, grimeTexture, leatherTexture, repeated, woodTexture } from './render/textures';
 
-const BULB_INTENSITY = 950;
+const BULB_INTENSITY = 1150;
 // L'ampoule pend assez bas pour rester dans le champ, au-dessus du créancier.
 export const BULB_Y = 9.8;
 // Le regard vise un peu au-dessus de la table pour voir l'ampoule et le sourire.
@@ -31,6 +33,8 @@ export interface Stage {
   dust: THREE.Points;
   /** Multiplicateur de la lumière de l'ampoule (baisse à la mort). */
   lightLevel: { value: number };
+  /** Sursaut de l'ampoule sur un gros score : 0 = calme, 1 = elle s'emballe. Retombe toute seule. */
+  flare: { value: number };
   feltColliders: Set<number>;
   woodColliders: Set<number>;
 }
@@ -40,13 +44,13 @@ export function createStage(container: HTMLElement, world: RAPIER.World): Stage 
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1) * RENDER_SCALE);
   renderer.setSize(window.innerWidth, window.innerHeight);
   renderer.shadowMap.enabled = true;
-  renderer.shadowMap.type = THREE.PCFShadowMap;
+  renderer.shadowMap.type = THREE.PCFSoftShadowMap;
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   container.appendChild(renderer.domElement);
 
   const scene = new THREE.Scene();
   scene.background = new THREE.Color(0x000000);
-  scene.fog = new THREE.Fog(0x000000, 24, 58);
+  scene.fog = new THREE.FogExp2(0x060403, 0.018);
 
   // Assis à la table, regard plongeant vers le créancier.
   const camera = new THREE.PerspectiveCamera(50, window.innerWidth / window.innerHeight, 0.1, 100);
@@ -60,7 +64,7 @@ export function createStage(container: HTMLElement, world: RAPIER.World): Stage 
   });
 
   // Lumière : une ampoule nue qui se balance, presque rien d'autre.
-  scene.add(new THREE.HemisphereLight(0x3a342a, 0x080504, 0.6));
+  scene.add(new THREE.HemisphereLight(0x3a342a, 0x080504, 0.38));
   const bulb = new THREE.PointLight(0xffc98a, BULB_INTENSITY, 45, 2);
   bulb.position.set(0, BULB_Y, 0);
   bulb.castShadow = true;
@@ -90,18 +94,28 @@ export function createStage(container: HTMLElement, world: RAPIER.World): Stage 
 
   // Cône de lumière poussiéreuse sous l'ampoule.
   const lightCone = new THREE.Mesh(
-    new THREE.ConeGeometry(6.4, BULB_Y, 18, 1, true).translate(0, -BULB_Y / 2, 0),
-    new THREE.MeshBasicMaterial({
-      color: 0xffc98a,
-      transparent: true,
-      opacity: LIGHT_CONE_OPACITY,
-      blending: THREE.AdditiveBlending,
-      depthWrite: false,
-      side: THREE.DoubleSide,
-      fog: false,
-    }),
+    new THREE.ConeGeometry(6.6, BULB_Y, 32, 12, true).translate(0, -BULB_Y / 2, 0),
+    volumeMaterial(0xffc07a, LIGHT_CONE_OPACITY),
   );
+  lightCone.renderOrder = 2;
   scene.add(lightCone);
+  // Halo autour de l'ampoule : la lumière « bave » dans l'air poussiéreux.
+  const halo = new THREE.Sprite(
+    new THREE.SpriteMaterial({ map: glowTexture(), color: 0xffd8a0, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false, fog: false }),
+  );
+  halo.scale.setScalar(3.6);
+  bulbMesh.add(halo);
+  // Réflecteur émaillé au-dessus de l'ampoule : la lumière part vers la table, le plafond reste noir.
+  const enamel = new THREE.MeshStandardMaterial({ color: 0x2a3a30, map: grimeTexture(), metalness: 0.4, roughness: 0.55, side: THREE.DoubleSide });
+  const reflector = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 1.25, 0.42, 18, 1, true), enamel);
+  reflector.position.y = 0.95;
+  reflector.castShadow = true;
+  const inside = new THREE.Mesh(
+    new THREE.CylinderGeometry(0.2, 1.22, 0.4, 18, 1, true),
+    new THREE.MeshBasicMaterial({ color: 0xd8cbb0, side: THREE.BackSide, fog: false }),
+  );
+  inside.position.y = 0.94;
+  bulbMesh.add(reflector, inside);
   const dustGeo = new THREE.BufferGeometry();
   const dustPos = new Float32Array(DUST_COUNT * 3);
   for (let i = 0; i < DUST_COUNT; i++) {
@@ -118,7 +132,7 @@ export function createStage(container: HTMLElement, world: RAPIER.World): Stage 
 
   // Appoint très faible depuis la place du joueur : les faces tournées vers lui
   // ne sont plus noires et ne se confondent plus avec l'ombre des dés.
-  const fill = new THREE.DirectionalLight(0xc8a880, 0.45);
+  const fill = new THREE.DirectionalLight(0xc8a880, 0.32);
   fill.position.set(0, 9, 22);
   fill.target.position.set(0, 0, 0);
   scene.add(fill, fill.target);
@@ -128,10 +142,12 @@ export function createStage(container: HTMLElement, world: RAPIER.World): Stage 
   rim.target.position.set(0, 0, -4);
   scene.add(rim, rim.target);
 
-  const felt = new THREE.MeshStandardMaterial({ map: feltTexture(), roughness: 1 });
+  const felt = new THREE.MeshStandardMaterial({ map: feltTexture(), bumpMap: feltTexture(), bumpScale: 1.2, roughness: 1 });
   // Chaque pièce de bois a sa propre répétition, pour que les veines gardent leur taille.
-  const wood = (length: number, dark = false) =>
-    new THREE.MeshStandardMaterial({ map: repeated(woodTexture(dark), length / 4, 1), roughness: 0.85, flatShading: true });
+  const wood = (length: number, dark = false) => {
+    const tex = repeated(woodTexture(dark), length / 4, 1);
+    return new THREE.MeshStandardMaterial({ map: tex, bumpMap: tex, bumpScale: 2.5, roughness: 0.7, metalness: 0.05, color: 0xd8b8a0 });
+  };
 
   const feltColliders = new Set<number>();
   const woodColliders = new Set<number>();
@@ -201,8 +217,62 @@ export function createStage(container: HTMLElement, world: RAPIER.World): Stage 
   scene.add(plank);
 
   buildCellar(scene);
+  buildDecor(scene);
+  buildPaddedRail(scene, railX, railZ);
 
-  return { renderer, scene, camera, bulb, bulbMesh, lightCone, dust, lightLevel: { value: 1 }, feltColliders, woodColliders };
+  return { renderer, scene, camera, bulb, bulbMesh, lightCone, dust, lightLevel: { value: 1 }, flare: { value: 0 }, feltColliders, woodColliders };
+}
+
+/**
+ * Rail capitonné de cuir sang-de-bœuf sur trois côtés, clouté de laiton : une vraie table de jeu,
+ * usée par des années de mains moites. Le côté du créancier reste en bois nu.
+ */
+function buildPaddedRail(scene: THREE.Scene, railX: number, railZ: number) {
+  const y = 1.0;
+  const r = 0.9;
+  const path = new THREE.CurvePath<THREE.Vector3>();
+  const v = (x: number, z: number) => new THREE.Vector3(x, y, z);
+  path.add(new THREE.LineCurve3(v(-railX, -railZ), v(-railX, railZ - r)));
+  path.add(new THREE.QuadraticBezierCurve3(v(-railX, railZ - r), v(-railX, railZ), v(-railX + r, railZ)));
+  path.add(new THREE.LineCurve3(v(-railX + r, railZ), v(railX - r, railZ)));
+  path.add(new THREE.QuadraticBezierCurve3(v(railX - r, railZ), v(railX, railZ), v(railX, railZ - r)));
+  path.add(new THREE.LineCurve3(v(railX, railZ - r), v(railX, -railZ)));
+  const leatherTex = repeated(leatherTexture(), 24, 1);
+  const leather = new THREE.MeshStandardMaterial({ map: leatherTex, bumpMap: leatherTex, bumpScale: 1.5, color: 0xc05a48, roughness: 0.5 });
+  const tube = new THREE.Mesh(new THREE.TubeGeometry(path, 160, 0.42, 10, false), leather);
+  tube.scale.set(1, 0.72, 1);
+  tube.position.y = y * 0.28;
+  tube.castShadow = tube.receiveShadow = true;
+  scene.add(tube);
+  for (const end of [v(-railX, -railZ), v(railX, -railZ)]) {
+    const cap = new THREE.Mesh(new THREE.SphereGeometry(0.42, 10, 8), leather);
+    cap.position.set(end.x, y, end.z);
+    cap.scale.set(1, 0.72, 1);
+    scene.add(cap);
+  }
+  // Clous de tapissier en laiton, réguliers, sur le flanc intérieur du rail.
+  const brass = new THREE.MeshStandardMaterial({ color: 0xc9a040, metalness: 0.9, roughness: 0.3, map: grimeTexture() });
+  const stud = new THREE.SphereGeometry(0.075, 6, 4);
+  const length = path.getLength();
+  const n = Math.floor(length / 0.75);
+  const studs = new THREE.InstancedMesh(stud, brass, n);
+  const m = new THREE.Matrix4();
+  for (let i = 0; i < n; i++) {
+    const t = (i + 0.5) / n;
+    const p = path.getPointAt(t);
+    const tan = path.getTangentAt(t);
+    const inward = new THREE.Vector3(-tan.z, 0, tan.x).multiplyScalar(-1);
+    if (inward.dot(new THREE.Vector3(-p.x, 0, -p.z)) < 0) inward.negate();
+    m.makeTranslation(p.x + inward.x * 0.36, y * 0.28 + y * 0.72 - 0.04, p.z + inward.z * 0.36);
+    studs.setMatrixAt(i, m);
+  }
+  scene.add(studs);
+  // Coins du rebord renforcés de laiton.
+  for (const x of [-railX - 0.1, railX + 0.1]) {
+    const corner = new THREE.Mesh(new THREE.BoxGeometry(0.9, 0.62, 0.9), brass);
+    corner.position.set(x, -0.29, 10.65);
+    scene.add(corner);
+  }
 }
 
 /**
@@ -213,6 +283,8 @@ function buildCellar(scene: THREE.Scene) {
   const wall = (w: number, h: number, back = false) =>
     new THREE.MeshStandardMaterial({
       map: repeated(brickTexture(), w / 5, h / 5),
+      bumpMap: repeated(brickTexture(), w / 5, h / 5),
+      bumpScale: 4,
       // Le mur du fond est plus sombre et se perd dans le brouillard, derrière le sourire.
       color: back ? 0x5a5a5a : 0xffffff,
       roughness: 1,
@@ -244,6 +316,13 @@ function buildCellar(scene: THREE.Scene) {
   neon.rotation.z = Math.PI / 2 + 0.12;
   neon.position.set(-12.5, 6.5, -CELLAR.back + 0.3);
   scene.add(neon);
+  // Le gaz rougeoie autour du tube : un halo qui bave sur les briques.
+  const neonGlow = new THREE.Sprite(
+    new THREE.SpriteMaterial({ map: glowTexture(), color: 0xff2030, blending: THREE.AdditiveBlending, depthWrite: false, fog: false, opacity: 0.7 }),
+  );
+  neonGlow.position.copy(neon.position).add(new THREE.Vector3(0, 0, 0.4));
+  neonGlow.scale.set(11, 3.2, 1);
+  scene.add(neonGlow);
   // Lueur courte : elle rougit les briques autour du néon, pas le fond derrière le créancier.
   const glow = new THREE.PointLight(0xff1020, 45, 11, 2);
   glow.position.set(-11.5, 6.5, -CELLAR.back + 1.5);
@@ -283,10 +362,15 @@ export function animateBulb(stage: Stage, time: number): boolean {
   // Grésillement : de brèves coupures, parfois en rafale.
   if (time > flickerUntil && Math.random() < 0.006) flickerUntil = time + 0.05 + Math.random() * 0.25;
   const dark = time < flickerUntil && Math.sin(time * 90) > -0.2;
-  const level = stage.lightLevel.value * (dark ? 0.25 : 1);
+  stage.flare.value = Math.max(0, stage.flare.value - 0.02);
+  const level = stage.lightLevel.value * (dark ? 0.25 : 1) * (1 + stage.flare.value * 0.9);
   stage.bulb.intensity = BULB_INTENSITY * level;
   (stage.bulbMesh.material as THREE.MeshBasicMaterial).color.setScalar(0.3 + 0.7 * level);
-  (stage.lightCone.material as THREE.MeshBasicMaterial).opacity = LIGHT_CONE_OPACITY * level;
+  const cone = stage.lightCone.material as THREE.ShaderMaterial;
+  cone.uniforms.uOpacity.value = LIGHT_CONE_OPACITY * level;
+  cone.uniforms.uTime.value = time;
+  const halo = stage.bulbMesh.children.find((c) => (c as THREE.Sprite).isSprite) as THREE.Sprite | undefined;
+  if (halo) halo.material.opacity = 0.15 + 0.85 * level;
 
   const pos = stage.dust.geometry.getAttribute('position') as THREE.BufferAttribute;
   for (let i = 0; i < pos.count; i++) {

@@ -3,6 +3,7 @@ import { Body } from './body';
 import { BOSS_POOL, BOSSES, type Boss } from './bosses';
 import { COMBOS, type ComboId, type ComboLevels } from './combos';
 import { stakeRules, type CupId, type StakeRule } from './cups';
+import { MAX_VIALS, VIAL_IDS, VIALS, type VialId } from './vials';
 import { DIE_TYPES, FACE_MODS, newDie, type DieTypeId, type FaceModId, type OwnedDie } from './dice';
 import { findRelic, ownRelic, RARITY_WEIGHT, RELICS, sellValue, type OwnedRelic, type RelicDef } from './relics';
 import { Rng } from './rng';
@@ -50,7 +51,8 @@ export type ShopItem =
   | { kind: 'relic'; def: RelicDef; price: number }
   | { kind: 'gravure'; combo: ComboId; price: number }
   | { kind: 'die'; type: DieTypeId; price: number }
-  | { kind: 'burin'; mod: FaceModId; price: number };
+  | { kind: 'burin'; mod: FaceModId; price: number }
+  | { kind: 'fiole'; vial: VialId; price: number };
 
 /** Un article qui demande de choisir un dé (et une face pour un burin). */
 export const needsTarget = (item: ShopItem) => item.kind === 'die' || item.kind === 'burin';
@@ -69,6 +71,8 @@ export interface RunOptions {
   missingFinger?: boolean;
   /** Run scénarisée du tutoriel. */
   tutorial?: boolean;
+  /** Table du jour : même graine pour tout le monde aujourd'hui. */
+  daily?: boolean;
 }
 
 /** Objectifs du tutoriel : le premier s'atteint, le second jamais. */
@@ -110,6 +114,8 @@ export class RunState {
   pactsSigned = 0;
 
   shop: (ShopItem | null)[] = [];
+  /** Fioles gardées sur la caisse, deux au plus. */
+  vials: VialId[] = [];
   rerollCost = REROLL_BASE;
 
   readonly cup: CupId;
@@ -118,6 +124,7 @@ export class RunState {
   private readonly unlocked: Set<string> | null;
   /** Tutoriel en cours ; il s'arrête au premier pacte et la run continue normalement. */
   tutorial: boolean;
+  readonly daily: boolean;
   /** Gobelet percé : un dé au hasard tombe de la table à chaque lancer. */
   readonly leaky: boolean;
   /** Gobelet doré : chaque nuit coûte plus cher. */
@@ -131,6 +138,7 @@ export class RunState {
     this.rules = stakeRules(this.stake);
     this.unlocked = o.unlocked ?? null;
     this.tutorial = !!o.tutorial;
+    this.daily = !!o.daily;
     this.leaky = this.cup === 'perce';
     this.cupDebt = this.cup === 'dore' ? 1.15 : 1;
     switch (this.cup) {
@@ -335,6 +343,11 @@ export class RunState {
       const mod = this.rng.pick(SHOP_MODS);
       items.push({ kind: 'burin', mod, price: this.price(FACE_MODS[mod].price) });
     }
+    // Une fiole, souvent : le marchand en a toujours une dans la doublure de sa valise.
+    if (this.rng.next() < 0.6) {
+      const vial = this.rng.pick(VIAL_IDS);
+      items.push({ kind: 'fiole', vial, price: this.price(VIALS[vial].price) });
+    }
     // Langue de serpent : un article maudit en plus, un peu moins cher.
     if (this.has('langueDeSerpent')) {
       const cursed = RELICS.filter((d) => d.rarity === 'maudite' && !taken.has(d.id) && (!this.unlocked || this.unlocked.has(d.id)));
@@ -351,6 +364,7 @@ export class RunState {
   canBuy(index: number) {
     const item = this.shop[index];
     if (!item || this.coins < item.price) return false;
+    if (item.kind === 'fiole') return this.vials.length < MAX_VIALS;
     return item.kind !== 'relic' || this.relics.length < MAX_RELICS;
   }
 
@@ -376,6 +390,9 @@ export class RunState {
         break;
       case 'burin':
         this.dice[die].mods[face] = item.mod;
+        break;
+      case 'fiole':
+        this.vials.push(item.vial);
         break;
     }
     this.shop[index] = null;

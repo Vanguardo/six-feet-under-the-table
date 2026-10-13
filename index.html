@@ -5,13 +5,16 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Six Feet Under the Table</title>
     <link rel="icon" href="data:," />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=IM+Fell+English+SC&family=Special+Elite&display=swap" rel="stylesheet" />
     <style>
       html, body {
         margin: 0;
         height: 100%;
         background: #000;
         overflow: hidden;
-        font-family: "Courier New", Courier, monospace;
+        font-family: "Special Elite", "Courier New", Courier, monospace;
         color: #d8cfb8;
         user-select: none;
       }
@@ -42,28 +45,32 @@
       #menu.show { display: flex; }
       #menu .panel { width: min(920px, calc(100vw - 32px)); padding: 24px 0; text-align: center; color: #d8cfb8; }
       #menu h1 {
-        font-size: clamp(34px, 7vw, 68px);
-        letter-spacing: 6px;
+        font-family: "IM Fell English SC", Georgia, serif;
+        font-weight: normal;
+        font-size: clamp(38px, 8vw, 80px);
+        letter-spacing: 4px;
         line-height: 1.05;
         margin: 0 0 12px;
         color: #c8102e;
         text-shadow: 0 0 24px rgba(200, 16, 46, 0.6), 0 4px 0 #2a0408;
       }
-      #menu h2 { letter-spacing: 4px; color: #e8dcc0; margin: 0 0 16px; }
+      #menu h2 { font-family: "IM Fell English SC", Georgia, serif; font-weight: normal; font-size: 30px; letter-spacing: 3px; color: #e8dcc0; margin: 0 0 16px; text-shadow: 0 2px 0 #000; }
       #menu h3 { letter-spacing: 3px; color: #e8dcc0; margin: 18px 0 8px; font-size: 15px; }
       #menu .subtitle { font-style: italic; color: #9c927c; margin-bottom: 28px; }
       #menu .small { font-size: 12px; color: #7a7060; margin-top: 18px; }
       #menu button {
         font: inherit;
         padding: 9px 18px;
-        background: #1a1210;
+        background: linear-gradient(#2a1c14, #120a07);
         color: #e8dcc0;
         border: 1px solid #5a3a1e;
+        box-shadow: inset 0 1px 0 rgba(255, 220, 180, 0.08), 0 2px 6px rgba(0, 0, 0, 0.6);
         cursor: pointer;
+        transition: border-color 0.15s, color 0.15s, transform 0.15s, box-shadow 0.15s;
       }
-      #menu button:hover:not(:disabled) { border-color: #f2c14e; color: #fff; }
+      #menu button:hover:not(:disabled) { border-color: #f2c14e; color: #fff; transform: translateY(-1px); box-shadow: inset 0 1px 0 rgba(255, 220, 180, 0.12), 0 0 14px rgba(200, 16, 46, 0.35); }
       #menu button:disabled { opacity: 0.4; cursor: default; }
-      #menu button.primary { background: #8c1f1a; border-color: #c8102e; font-weight: bold; }
+      #menu button.primary { background: linear-gradient(#a8261f, #6a120e); border-color: #c8102e; font-weight: bold; letter-spacing: 1px; }
       #menu button.on { border-color: #f2c14e; color: #f2c14e; }
       #menu .buttons { display: flex; flex-direction: column; gap: 10px; align-items: center; }
       #menu .buttons button { min-width: 240px; }
@@ -80,7 +87,7 @@
       #menu .stake { min-width: 42px; padding: 7px 0; }
       #menu .rules { list-style: none; padding: 0; margin: 10px 0 0; font-size: 13px; color: #c8a080; }
       #menu .relics { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 8px; text-align: left; }
-      #menu .relic { display: flex; flex-direction: column; gap: 3px; padding: 9px; background: #e8e0c8; color: #1a1410; font-size: 12px; }
+      #menu .relic { display: flex; flex-direction: column; gap: 3px; padding: 9px; background: radial-gradient(ellipse at 30% 20%, #f0e8d2, #d8ccac); color: #1a1410; font-size: 12px; box-shadow: 0 3px 8px rgba(0, 0, 0, 0.5); }
       #menu .relic i { font-size: 11px; opacity: 0.7; }
       #menu .relic.locked, #menu .relic.unseen { background: #2a1e16; color: #7a6a58; }
       #menu .relic.rare { background: #e0c8c0; }
@@ -88,6 +95,12 @@
       #menu .registry { display: flex; gap: 40px; justify-content: center; flex-wrap: wrap; }
       #menu .registry .line { display: flex; justify-content: space-between; gap: 30px; min-width: 220px; padding: 4px 0; border-bottom: 1px dashed #3a2a1e; }
       #menu .registry b { color: #c8102e; }
+      #menu .summary { max-width: 520px; margin: 0 auto; padding: 18px 22px; background: radial-gradient(ellipse at 30% 10%, #efe6cf, #d4c6a2); color: #1a1410; text-align: left; box-shadow: 0 10px 40px rgba(0, 0, 0, 0.8); transform: rotate(-0.6deg); }
+      #menu .summary h2 { color: #6a0c0c; text-shadow: none; text-align: center; margin-bottom: 4px; }
+      #menu .summary .cause { text-align: center; font-size: 13px; color: #4a3a2a; margin-bottom: 12px; }
+      #menu .summary .line { display: flex; justify-content: space-between; gap: 20px; padding: 3px 0; border-bottom: 1px dashed #8a7a60; font-size: 14px; }
+      #menu .summary .line b { color: #6a0c0c; }
+      #menu .summary .relics-list { font-size: 12px; color: #3a2a1a; margin-top: 10px; }
       #menu .setting { display: flex; justify-content: space-between; align-items: center; gap: 16px; max-width: 560px; margin: 10px auto; text-align: left; }
       #menu .setting small { display: block; font-size: 11px; color: #7a7060; }
       #menu .setting .langs { margin: 0; }
@@ -149,6 +162,7 @@
         text-align: center;
       }
       #banner {
+        font-family: "IM Fell English SC", Georgia, serif;
         position: fixed;
         top: 38%;
         left: 50%;
@@ -164,6 +178,7 @@
       }
       #banner.show { opacity: 1; }
       #combo {
+        font-family: "IM Fell English SC", Georgia, serif;
         position: fixed;
         top: 20%;
         left: 50%;
@@ -314,6 +329,8 @@
       #shop .clou { outline: 2px solid #8a8a90; }
       #shop .crane { outline: 2px solid #e0dcd0; }
       #shop .flamme { outline: 2px solid #ff6a10; }
+      #shop .oeil { outline: 2px solid #d8e8f0; }
+      #shop .jumelle { outline: 2px solid #c070c0; }
       #shop .faces button.face {
         width: 64px;
         height: 64px;
@@ -365,6 +382,52 @@
       #loading span { animation: blink 1.2s steps(2) infinite; }
       #loading.error { color: #b03030; letter-spacing: 1px; padding: 24px; text-align: center; }
       @keyframes blink { 50% { opacity: 0.2; } }
+
+      /* Téléphones et petites fenêtres : tout se resserre pour laisser voir la table. */
+      @media (max-width: 900px), (max-height: 520px) {
+        #menu .panel { padding: 10px 0; font-size: 13px; }
+        #menu h1 { font-size: clamp(24px, 6vw, 40px); letter-spacing: 3px; margin-bottom: 6px; }
+        #menu h2 { font-size: 16px; margin-bottom: 8px; }
+        #menu h3 { font-size: 12px; margin: 10px 0 6px; }
+        #menu .subtitle { margin-bottom: 12px; font-size: 12px; }
+        #menu button { padding: 6px 10px; font-size: 12px; }
+        #menu .buttons { gap: 6px; }
+        #menu .buttons button { min-width: 180px; }
+        #menu .row { margin-top: 10px; gap: 6px; }
+        #menu .cups { grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 6px; }
+        #menu .cup { padding: 7px; min-height: 0; }
+        #menu .cup span { font-size: 10px; }
+        #menu .stake { min-width: 30px; padding: 5px 0; }
+        #menu .rules { font-size: 11px; }
+        #menu .relics { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); }
+        #menu .relic { font-size: 10px; padding: 6px; }
+        #menu .registry { gap: 12px; }
+        #menu .registry .line { min-width: 160px; padding: 2px 0; }
+        #menu .setting { margin: 6px auto; gap: 10px; }
+        #menu .warning .tag { font-size: 16px; }
+        #menu .warning p { font-size: 12px; }
+        #menu input[type="range"] { width: 130px; }
+        #hint { font-size: 11px; bottom: 6px; width: 92vw; }
+        #banner { font-size: 20px; letter-spacing: 2px; }
+        #banner small { font-size: 11px; }
+        #combo { font-size: 24px; }
+        #combo small { font-size: 12px; }
+        #tally .name { font-size: 14px; }
+        #tally .chips, #tally .mult { min-width: 52px; padding: 3px 8px; font-size: 18px; }
+        #tally .x { font-size: 16px; }
+        #tally .total { font-size: 22px; min-height: 26px; }
+        #tooltip { max-width: 210px; font-size: 11px; padding: 6px 8px; }
+        #toast { font-size: 11px; bottom: 30px; }
+        #shop { top: 6px; padding: 8px 10px; max-height: 32vh; width: min(520px, calc(100vw - 16px)); }
+        #shop .head { font-size: 14px; letter-spacing: 2px; }
+        #shop .earn, #shop .sub { font-size: 10px; margin: 4px 0 2px; }
+        #shop .card { font-size: 10px; }
+        #shop .card .name { font-size: 12px; }
+        #shop button { padding: 4px 6px; font-size: 11px; }
+        #shop .faces button.face { width: 46px; height: 46px; font-size: 16px; }
+        #shop .actions { margin-top: 8px; }
+        #shop .actions button { padding: 6px 10px; }
+      }
     </style>
   </head>
   <body>

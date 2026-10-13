@@ -4,7 +4,7 @@ export const MAX_STEPS_PER_FRAME = 6;
 export const GRAVITY = -60;
 
 // Rendu en basse résolution, agrandi en pixelated : premier pas vers le look PS1.
-export const RENDER_SCALE = 0.6;
+export const RENDER_SCALE = 0.75;
 
 // Table : feutre de 22 × 14, centré sur l'origine, dessus à y = 0.
 export const TABLE_HALF_W = 11;

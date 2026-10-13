@@ -84,6 +84,8 @@ export class Cup {
     ];
     const leather = new THREE.MeshStandardMaterial({
       map: repeated(leatherTexture(), 3, 1),
+      bumpMap: repeated(leatherTexture(), 3, 1),
+      bumpScale: 2,
       roughness: 0.85,
       side: THREE.DoubleSide,
       flatShading: true,

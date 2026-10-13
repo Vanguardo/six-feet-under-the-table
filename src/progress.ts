@@ -38,6 +38,8 @@ interface SaveData {
   cups: Partial<Record<CupId, number>>;
   relics: string[];
   seen: string[];
+  /** Table du jour : la date jouée et le plus loin atteint ce jour-là. */
+  daily?: { date: string; best: string; tries: number };
 }
 
 /** Reliques disponibles dès le départ ; les autres se gagnent. */
@@ -242,6 +244,35 @@ export class Progress {
       this.data.cups[cup] = Math.max(this.data.cups[cup] ?? 0, Math.min(MAX_STAKE, stake + 1));
     }
     this.check();
+  }
+
+  /** La graine du jour : la même table pour tout le monde, de minuit à minuit. */
+  static dailySeed(date = Progress.today()) {
+    let h = 2166136261;
+    for (const ch of `sixfeet-${date}`) h = Math.imul(h ^ ch.charCodeAt(0), 16777619);
+    return h >>> 0;
+  }
+
+  static today() {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  }
+
+  /** Meilleur résultat de la table du jour, si elle a déjà été jouée aujourd'hui. */
+  get daily() {
+    const d = this.data.daily;
+    return d && d.date === Progress.today() ? d : null;
+  }
+
+  /** Une partie de la table du jour s'achève : `rank` sert à comparer, `label` à l'afficher. */
+  recordDaily(rank: number, label: string) {
+    const today = Progress.today();
+    const d = this.data.daily?.date === today ? this.data.daily : { date: today, best: '', tries: 0 };
+    d.tries++;
+    const bestRank = Number(d.best.split('|')[0] || -1);
+    if (rank > bestRank) d.best = `${rank}|${label}`;
+    this.data.daily = d;
+    this.save();
   }
 
   /** Remise à zéro complète (réglages conservés). */

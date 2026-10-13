@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { RoundedBoxGeometry } from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
 import { grimeTexture, skinTexture } from '../render/textures';
 
 // Une phalange de trop à chaque doigt : quatre segments au lieu de trois.
@@ -28,14 +29,14 @@ export interface HandLook {
   cuff: number;
 }
 
-export const CREDITOR_HANDS: HandLook = { skin: 0xffffff, knuckle: 0xb8aaa0, nail: 0x8c7a3c, sleeve: 0x0b0808, cuff: 0x4a4038 };
+export const CREDITOR_HANDS: HandLook = { skin: 0xd8d0c8, knuckle: 0xb8aaa0, nail: 0x8c7a3c, sleeve: 0x0b0808, cuff: 0x4a4038 };
 export const MERCHANT_HANDS: HandLook = { skin: 0x6a6450, knuckle: 0x7a6a50, nail: 0x1a1410, sleeve: 0x2a1e12, cuff: 0x3a2c1c };
 export const PLAYER_HANDS: HandLook = { skin: 0xe8cdb8, knuckle: 0xc8a090, nail: 0xd8c8b0, sleeve: 0x2a2620, cuff: 0x4a4236 };
 
 const materialsFor = (look: HandLook) => ({
-  skin: new THREE.MeshStandardMaterial({ map: skinTexture(), color: look.skin, roughness: 0.75, flatShading: true }),
+  skin: new THREE.MeshStandardMaterial({ map: skinTexture(), bumpMap: skinTexture(), bumpScale: 0.8, color: look.skin, roughness: 0.6 }),
   // Articulations et tendons un peu plus sombres : ils dessinent le relief de la main.
-  knuckleSkin: new THREE.MeshStandardMaterial({ map: skinTexture(), color: look.knuckle, roughness: 0.7, flatShading: true }),
+  knuckleSkin: new THREE.MeshStandardMaterial({ map: skinTexture(), bumpMap: skinTexture(), bumpScale: 0.8, color: look.knuckle, roughness: 0.65 }),
   nail: new THREE.MeshStandardMaterial({ color: look.nail, map: grimeTexture(), roughness: 0.4, flatShading: true }),
   sleeve: new THREE.MeshStandardMaterial({ color: look.sleeve, roughness: 1, flatShading: true }),
   cuff: new THREE.MeshStandardMaterial({ color: look.cuff, map: grimeTexture(), roughness: 1, flatShading: true }),
@@ -43,7 +44,8 @@ const materialsFor = (look: HandLook) => ({
 
 /** Paume trapézoïdale : plus large aux jointures qu'au poignet, bombée sur le dessus. */
 function palmGeometry() {
-  const geo = new THREE.BoxGeometry(PALM.w, PALM.h, PALM.l, 2, 1, 2);
+  // Arrondie : une vraie main n'a pas d'arêtes.
+  const geo = new RoundedBoxGeometry(PALM.w, PALM.h, PALM.l, 3, 0.09);
   const pos = geo.getAttribute('position') as THREE.BufferAttribute;
   for (let i = 0; i < pos.count; i++) {
     const z = pos.getZ(i) / PALM.l + 0.5; // 0 au poignet, 1 aux jointures
@@ -137,13 +139,13 @@ export class Hand {
       }
       const thick = 0.13 - i * 0.014;
       // Segment légèrement effilé vers le bout.
-      const seg = new THREE.Mesh(new THREE.CylinderGeometry(thick * 0.45, thick * 0.55, len * 0.96, 5).rotateX(Math.PI / 2), this.m.skin);
+      const seg = new THREE.Mesh(new THREE.CylinderGeometry(thick * 0.45, thick * 0.55, len * 0.96, 8).rotateX(Math.PI / 2), this.m.skin);
       seg.position.z = len / 2;
       seg.castShadow = true;
       joint.add(seg);
       // Articulation noueuse entre deux phalanges.
       if (i > 0) {
-        const knot = new THREE.Mesh(new THREE.SphereGeometry(thick * 0.62, 5, 4), this.m.knuckleSkin);
+        const knot = new THREE.Mesh(new THREE.SphereGeometry(thick * 0.62, 8, 6), this.m.knuckleSkin);
         knot.scale.set(1, 0.85, 0.8);
         joint.add(knot);
       }

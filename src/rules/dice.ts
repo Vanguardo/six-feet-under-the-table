@@ -1,7 +1,7 @@
 // Dés et faces : chaque dé a six faces, chacune avec une valeur et, parfois, une gravure.
 
 export type DieTypeId = 'os' | 'ecrase' | 'noirci' | 'ivoire' | 'pipe' | 'verre' | 'plomb' | 'dent' | 'maudit';
-export type FaceModId = 'doree' | 'sanglante' | 'vide' | 'clou' | 'crane' | 'flamme';
+export type FaceModId = 'doree' | 'sanglante' | 'vide' | 'clou' | 'crane' | 'flamme' | 'oeil' | 'jumelle';
 
 export interface DieType {
   id: DieTypeId;
@@ -104,6 +104,8 @@ export const FACE_MODS: Record<FaceModId, FaceMod> = {
   clou: { id: 'clou', name: 'Face clou', price: 3, description: '+25 jetons ; le dé ne peut plus être relancé pendant la main.', color: '#8a8a90' },
   crane: { id: 'crane', name: 'Face crâne', price: 6, description: 'Joker : prend la valeur qui rapporte le plus. Le dé se brise au 3e usage.', color: '#e0dcd0' },
   flamme: { id: 'flamme', name: 'Face flamme', price: 4, description: '+4 mult par relance déjà utilisée pendant la main.', color: '#ff6a10' },
+  oeil: { id: 'oeil', name: 'Face œil', price: 4, description: 'Quand elle sort, elle te regarde : +1 relance pour la main (une fois par main).', color: '#d8e8f0' },
+  jumelle: { id: 'jumelle', name: 'Face jumelle', price: 4, description: 'Copie la valeur du dé posé le plus près d’elle sur le tapis.', color: '#c070c0' },
 };
 
 /** Un dé possédé : son type, ses faces gravées, son usure. */

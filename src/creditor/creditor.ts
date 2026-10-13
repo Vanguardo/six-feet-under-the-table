@@ -33,6 +33,8 @@ interface Action {
   /** Vitesse de suivi des mains : plus haut = mouvements secs. */
   stiffness: number;
   onEnd?: () => void;
+  /** Si un autre geste coupe celui-ci : remettre le visage et l'ardoise en ordre. */
+  interrupt?: () => void;
 }
 
 // Les mains reposent sur la planche du créancier, de l'autre côté de la table.
@@ -330,6 +332,10 @@ export class Creditor {
         this.engraving.reveal(1);
         this.smile.raise(false);
       },
+      interrupt: () => {
+        this.engraving.reveal(1);
+        this.smile.raise(false);
+      },
     });
   }
 
@@ -356,6 +362,7 @@ export class Creditor {
       },
       events: [],
       onEnd: () => this.smile.clench(false),
+      interrupt: () => this.smile.clench(false),
     });
   }
 
@@ -635,6 +642,7 @@ export class Creditor {
   }
 
   reset() {
+    this.action?.interrupt?.();
     for (const o of this.leftovers) this.scene.remove(o);
     this.leftovers.length = 0;
     this.action = null;
@@ -652,6 +660,7 @@ export class Creditor {
   // ---------------------------------------------------------------- animation
 
   private play(a: Omit<Action, 't'>) {
+    this.action?.interrupt?.();
     this.action = { ...a, t: 0 };
   }
 

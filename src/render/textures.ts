@@ -119,7 +119,18 @@ export function woodTexture(dark = false) {
 /** Feutre de jeu usé : taches de sang séché, brûlures de cigarette, zones râpées. */
 export function feltTexture(red = false) {
   return make(`felt-${red}`, 256, (g, size, rng) => {
-    speckle(g, size, rng, red ? [62, 12, 14] : [24, 52, 36], 14);
+    speckle(g, size, rng, red ? [72, 14, 16] : [30, 72, 48], 16);
+    // Fibres du feutre : de courts traits clairs et sombres, couchés dans tous les sens.
+    for (let i = 0; i < 1400; i++) {
+      const x = rng.next() * size;
+      const y = rng.next() * size;
+      const a = rng.next() * Math.PI;
+      g.strokeStyle = rng.next() < 0.5 ? rgb(255, 255, 230, 0.05) : rgb(0, 0, 0, 0.1);
+      g.beginPath();
+      g.moveTo(x, y);
+      g.lineTo(x + Math.cos(a) * 3, y + Math.sin(a) * 3);
+      g.stroke();
+    }
     // Usure : zones plus claires et râpées.
     for (let i = 0; i < 10; i++) stain(g, rng.next() * size, rng.next() * size, 20 + rng.next() * 40, red ? rgb(90, 40, 30, 0.18) : rgb(70, 90, 60, 0.16));
     if (red) return;

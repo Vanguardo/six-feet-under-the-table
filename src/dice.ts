@@ -38,16 +38,47 @@ function faceTexture(type: DieType, value: number, mod: FaceModId | null, hidden
   const key = `${type.id}:${value}:${mod}:${hidden}`;
   const cached = faceCache.get(key);
   if (cached) return cached;
+  // On dessine dans un repère de 64, sur une toile deux fois plus fine.
   const size = 64;
   const canvas = document.createElement('canvas');
-  canvas.width = canvas.height = size;
+  canvas.width = canvas.height = size * 2;
   const g = canvas.getContext('2d')!;
+  g.scale(2, 2);
   g.fillStyle = type.look.bone;
   g.fillRect(0, 0, size, size);
-  // Salissures : os jauni, pas un dé de casino propre.
-  for (let i = 0; i < 90; i++) {
-    g.fillStyle = `rgba(70, 50, 30, ${Math.random() * 0.14})`;
-    g.fillRect(Math.random() * size, Math.random() * size, 2, 2);
+  // Os poli au centre, plus sombre et crasseux vers les arêtes.
+  const ao = g.createRadialGradient(32, 32, 10, 32, 32, 46);
+  ao.addColorStop(0, 'rgba(255, 250, 235, 0.10)');
+  ao.addColorStop(1, 'rgba(40, 25, 10, 0.38)');
+  g.fillStyle = ao;
+  g.fillRect(0, 0, size, size);
+  // Stries de croissance de l'os, fines et ondulées.
+  g.lineWidth = 0.5;
+  for (let i = 0; i < 14; i++) {
+    const y0 = Math.random() * size;
+    g.strokeStyle = `rgba(90, 60, 30, ${0.06 + Math.random() * 0.08})`;
+    g.beginPath();
+    for (let x = 0; x <= size; x += 4) g.lineTo(x, y0 + Math.sin(x * 0.15 + i) * 1.5);
+    g.stroke();
+  }
+  // Salissures et piqûres : os jauni, pas un dé de casino propre.
+  for (let i = 0; i < 120; i++) {
+    g.fillStyle = `rgba(70, 50, 30, ${Math.random() * 0.16})`;
+    g.fillRect(Math.random() * size, Math.random() * size, 1 + Math.random(), 1 + Math.random());
+  }
+  // Une fêlure, parfois.
+  if (Math.random() < 0.35) {
+    g.strokeStyle = 'rgba(40, 25, 12, 0.45)';
+    g.beginPath();
+    let x = Math.random() * size;
+    let y = 0;
+    g.moveTo(x, y);
+    while (y < size * 0.6) {
+      x += (Math.random() - 0.5) * 6;
+      y += 3 + Math.random() * 4;
+      g.lineTo(x, y);
+    }
+    g.stroke();
   }
   if (!hidden) {
     if (mod === 'vide') {
@@ -75,10 +106,26 @@ function faceTexture(type: DieType, value: number, mod: FaceModId | null, hidden
       g.fillText(String(value), 32, 35);
       if (value === 6 || value === 9) g.fillRect(22, 54, 20, 3); // distingue 6 et 9
     } else {
-      g.fillStyle = mod === 'doree' ? '#e8b830' : value === 1 && type.id === 'os' ? '#6e0d12' : type.look.ink;
+      const ink = mod === 'doree' ? '#e8b830' : value === 1 && type.id === 'os' ? '#6e0d12' : type.look.ink;
       for (const [x, y] of PIPS[value]) {
+        const r = value === 1 ? 8 : 5.5;
+        const cx = x * size;
+        const cy = y * size;
+        // Point creusé : la lèvre claire en bas, l'ombre portée en haut, l'encre au fond.
+        g.fillStyle = 'rgba(255, 245, 225, 0.35)';
         g.beginPath();
-        g.arc(x * size, y * size, value === 1 ? 8 : 5.5, 0, Math.PI * 2);
+        g.arc(cx + 0.6, cy + 0.8, r + 0.9, 0, Math.PI * 2);
+        g.fill();
+        g.fillStyle = ink;
+        g.beginPath();
+        g.arc(cx, cy, r, 0, Math.PI * 2);
+        g.fill();
+        const shade = g.createRadialGradient(cx + r * 0.3, cy + r * 0.35, r * 0.1, cx, cy, r);
+        shade.addColorStop(0, 'rgba(255, 255, 255, 0.12)');
+        shade.addColorStop(1, 'rgba(0, 0, 0, 0.55)');
+        g.fillStyle = shade;
+        g.beginPath();
+        g.arc(cx, cy, r, 0, Math.PI * 2);
         g.fill();
       }
     }
@@ -89,6 +136,43 @@ function faceTexture(type: DieType, value: number, mod: FaceModId | null, hidden
   tex.minFilter = THREE.NearestFilter;
   tex.colorSpace = THREE.SRGBColorSpace;
   faceCache.set(key, tex);
+  return tex;
+}
+
+const bumpCache = new Map<string, THREE.Texture>();
+
+/** Relief d'une face : blanc = surface, noir = creux des points et des chiffres gravés. */
+function faceBump(type: DieType, value: number, mod: FaceModId | null, hidden: boolean): THREE.Texture {
+  const key = `${type.id}:${value}:${mod}:${hidden}`;
+  const cached = bumpCache.get(key);
+  if (cached) return cached;
+  const size = 64;
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = size;
+  const g = canvas.getContext('2d')!;
+  g.fillStyle = '#d0d0d0';
+  g.fillRect(0, 0, size, size);
+  if (!hidden && mod !== 'vide' && mod !== 'crane') {
+    g.fillStyle = '#202020';
+    if (type.look.numerals || value > 6 || value === 0) {
+      g.font = `bold ${value >= 10 ? 34 : 44}px "Courier New", monospace`;
+      g.textAlign = 'center';
+      g.textBaseline = 'middle';
+      g.fillText(String(value), 32, 35);
+    } else {
+      for (const [x, y] of PIPS[value] ?? []) {
+        g.beginPath();
+        g.arc(x * size, y * size, value === 1 ? 8 : 5.5, 0, Math.PI * 2);
+        g.fill();
+      }
+    }
+  }
+  if (mod === 'vide') {
+    g.fillStyle = '#000';
+    g.fillRect(10, 10, size - 20, size - 20);
+  }
+  const tex = new THREE.CanvasTexture(canvas);
+  bumpCache.set(key, tex);
   return tex;
 }
 
@@ -114,6 +198,30 @@ function drawMod(g: CanvasRenderingContext2D, mod: FaceModId, size: number) {
       g.lineTo(54, 4);
       g.lineTo(60, 16);
       g.fill();
+      break;
+    case 'oeil':
+      // Un petit œil ouvert dans le coin, qui fixe le joueur.
+      g.beginPath();
+      g.ellipse(53, 10, 7, 4, 0, 0, Math.PI * 2);
+      g.fill();
+      g.fillStyle = '#2a4a6a';
+      g.beginPath();
+      g.arc(53, 10, 2.6, 0, Math.PI * 2);
+      g.fill();
+      g.fillStyle = '#050505';
+      g.beginPath();
+      g.arc(53, 10, 1.2, 0, Math.PI * 2);
+      g.fill();
+      break;
+    case 'jumelle':
+      // Deux cercles qui se chevauchent.
+      g.lineWidth = 2;
+      g.strokeStyle = FACE_MODS[mod].color;
+      for (const x of [49, 56]) {
+        g.beginPath();
+        g.arc(x, 10, 4.5, 0, Math.PI * 2);
+        g.stroke();
+      }
       break;
   }
 }
@@ -177,7 +285,7 @@ export class Die {
 
   constructor(world: RAPIER.World, scene: THREE.Scene) {
     this.materials = FACE_VALUES.map(
-      (v) => new THREE.MeshStandardMaterial({ map: faceTexture(DIE_TYPES.os, v, null, false), color: 0xb9b0a0, roughness: 0.7, metalness: 0 }),
+      (v) => new THREE.MeshStandardMaterial({ map: faceTexture(DIE_TYPES.os, v, null, false), bumpMap: faceBump(DIE_TYPES.os, v, null, false), bumpScale: 3, color: 0xb9b0a0, roughness: 0.45, metalness: 0 }),
     );
     this.mesh = new THREE.Mesh(geometry, this.materials);
     this.mesh.castShadow = true;
@@ -234,6 +342,8 @@ export class Die {
       const value = mod === 'vide' ? 0 : type.faces[face];
       const m = this.materials[g];
       m.map = faceTexture(type, value, mod, hidden);
+      m.bumpMap = faceBump(type, value, mod, hidden);
+      m.bumpScale = 3;
       // Le verre laisse deviner ce qu'il y a derrière.
       m.transparent = type.id === 'verre';
       m.opacity = type.id === 'verre' ? 0.72 : 1;
