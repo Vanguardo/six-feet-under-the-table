@@ -179,6 +179,53 @@ export function buildRelicMesh(id: string): THREE.Object3D {
       for (const x of [-0.05, 0.05]) add(new THREE.ConeGeometry(0.03, 0.22, 4), mat(0x6a1a2a), [x * 1.6, 0.03, -0.26], [-Math.PI / 2, 0, 0]);
       add(new THREE.SphereGeometry(0.05, 5, 4), mat(0x3a8a30, { emissive: 0x1a4a10 }), [0, 0.06, 0.3]);
       break;
+    case 'deACoudre':
+      add(new THREE.CylinderGeometry(0.16, 0.2, 0.36, 10), mat(0xb8b0a0, { metalness: 0.8, roughness: 0.35 }), [0, 0.18, 0]);
+      add(new THREE.SphereGeometry(0.16, 10, 6, 0, Math.PI * 2, 0, Math.PI / 2), mat(0xb8b0a0, { metalness: 0.8, roughness: 0.35 }), [0, 0.36, 0]);
+      break;
+    case 'trefleSeche':
+      for (let i = 0; i < 4; i++) {
+        const a = (i / 4) * Math.PI * 2 + 0.4;
+        add(new THREE.SphereGeometry(0.13, 6, 4), mat(0x5a6a2a), [Math.cos(a) * 0.14, 0.03, Math.sin(a) * 0.14]).scale.set(1, 0.2, 1);
+      }
+      add(new THREE.CylinderGeometry(0.015, 0.015, 0.3, 4), mat(0x4a4a1a), [0.1, 0.03, 0.22], [Math.PI / 2, 0, 0.5]);
+      break;
+    case 'ferACheval':
+      add(new THREE.TorusGeometry(0.26, 0.05, 5, 12, Math.PI * 1.35), mat(0x6a3a22, { metalness: 0.5, roughness: 0.7 }), [0, 0.05, 0], [Math.PI / 2, 0, -0.6]);
+      break;
+    case 'ratEmpaille':
+      add(new THREE.SphereGeometry(0.22, 8, 6), mat(0x4a4038, { roughness: 1 }), [0, 0.18, 0]).scale.set(0.8, 0.75, 1.4);
+      add(new THREE.ConeGeometry(0.11, 0.24, 6), mat(0x4a4038, { roughness: 1 }), [0, 0.18, -0.38], [-Math.PI / 2, 0, 0]);
+      add(new THREE.CylinderGeometry(0.02, 0.01, 0.55, 4), mat(0xb08878), [0, 0.06, 0.48], [Math.PI / 2 - 0.2, 0, 0]);
+      for (const x of [-0.07, 0.07]) add(new THREE.SphereGeometry(0.025, 4, 3), mat(0xa01010, { emissive: 0x400000 }), [x, 0.25, -0.4]);
+      break;
+    case 'lettreDeChange':
+      add(new THREE.BoxGeometry(0.5, 0.02, 0.36), paper, [0, 0.03, 0], [0, 0.3, 0]);
+      add(new THREE.CylinderGeometry(0.07, 0.07, 0.03, 8), red, [0.12, 0.05, 0.08]);
+      break;
+    case 'chandelleNoire':
+      add(new THREE.CylinderGeometry(0.12, 0.13, 0.6, 8), mat(0x141012), [0, 0.3, 0]);
+      add(new THREE.ConeGeometry(0.05, 0.14, 6), mat(0xffa030, { emissive: 0xff7010, emissiveIntensity: 1.4 }), [0, 0.68, 0]);
+      add(new THREE.CylinderGeometry(0.2, 0.2, 0.04, 10), mat(0x141012), [0, 0.02, 0]);
+      break;
+    case 'marteauDeJuge':
+      add(new THREE.CylinderGeometry(0.12, 0.12, 0.42, 8), mat(0x4a2a16), [0, 0.13, 0], [0, 0, Math.PI / 2]);
+      add(new THREE.CylinderGeometry(0.035, 0.035, 0.55, 6), mat(0x3a2010), [0, 0.13, 0.3], [Math.PI / 2, 0, 0]);
+      add(new THREE.CylinderGeometry(0.03, 0.03, 0.44, 8), gold, [0.18, 0.13, 0], [0, 0, Math.PI / 2]);
+      break;
+    case 'mainDeGloire':
+      add(new THREE.BoxGeometry(0.34, 0.12, 0.3), skin, [0, 0.2, 0]);
+      for (let i = 0; i < 4; i++) {
+        add(new THREE.CylinderGeometry(0.035, 0.04, 0.32, 5), skin, [-0.12 + i * 0.08, 0.42, 0]);
+        add(new THREE.ConeGeometry(0.03, 0.08, 5), mat(0xffa030, { emissive: 0xff7010, emissiveIntensity: 1.2 }), [-0.12 + i * 0.08, 0.63, 0]);
+      }
+      add(new THREE.CylinderGeometry(0.16, 0.2, 0.14, 8), mat(0x2a1a10), [0, 0.07, 0]);
+      break;
+    case 'dentDeLait':
+      add(new THREE.BoxGeometry(0.16, 0.14, 0.14), mat(0xf0ead8, { roughness: 0.3 }), [0, 0.12, 0]);
+      add(new THREE.ConeGeometry(0.06, 0.12, 5), mat(0xe0d0b8), [0, 0.02, 0], [Math.PI, 0, 0]);
+      add(new THREE.TorusGeometry(0.2, 0.012, 4, 14), mat(0x7a0c10), [0, 0.02, 0], [Math.PI / 2, 0, 0]);
+      break;
     default:
       add(new THREE.BoxGeometry(0.4, 0.4, 0.4), red, [0, 0.2, 0]);
   }

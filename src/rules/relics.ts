@@ -28,6 +28,8 @@ export interface HandContext {
   /** Mains restantes après celle-ci. */
   handsLeftAfter: number;
   relicCount: number;
+  /** Reliques maudites posées sur le rebord. */
+  cursed: number;
   body: Body;
   /** Combinaison de la main précédente dans l'échéance. */
   previousCombo: ComboId | null;
@@ -48,8 +50,8 @@ export interface RelicDef {
   onHand?: (ctx: HandContext, state: RelicState) => Effect | null;
   /** Après le scoring d'une main (effets qui s'usent). */
   afterHand?: (state: RelicState) => void;
-  /** Pièces gagnées à la fin d'une échéance réussie. */
-  onEcheanceEnd?: (state: RelicState) => number;
+  /** Pièces gagnées à la fin d'une échéance réussie (`end` : mains et relances qui restaient). */
+  onEcheanceEnd?: (state: RelicState, end: { hands: number; rerolls: number }) => number;
   /** Texte dynamique, quand la relique accumule une valeur. */
   status?: (state: RelicState) => string;
 }
@@ -138,6 +140,30 @@ export const RELICS: RelicDef[] = [
     onHand: ({ result }) => (SUITES.includes(result.combo.id) ? { mult: 3 } : null),
   },
   {
+    id: 'deACoudre',
+    name: 'Dé à coudre',
+    rarity: 'commune',
+    price: 4,
+    description: 'Si les cinq dés marquent : +30 jetons',
+    onHand: ({ result }) => (result.scoring.length >= 5 ? { chips: 30 } : null),
+  },
+  {
+    id: 'trefleSeche',
+    name: 'Trèfle séché',
+    rarity: 'commune',
+    price: 4,
+    description: 'Chaque 4 ou 5 marquant : +3 mult',
+    onScoringDie: (f) => (f.value === 4 || f.value === 5 ? { mult: 3 } : null),
+  },
+  {
+    id: 'ferACheval',
+    name: 'Fer à cheval rouillé',
+    rarity: 'commune',
+    price: 4,
+    description: 'Chaque valeur paire qui marque : +8 jetons',
+    onScoringDie: (f) => (f.value > 0 && f.value % 2 === 0 ? { chips: 8 } : null),
+  },
+  {
     id: 'pieceTrouee',
     name: 'Pièce trouée',
     rarity: 'commune',
@@ -219,6 +245,28 @@ export const RELICS: RelicDef[] = [
     description: 'Un lancer violent ajoute +1 à un dé au hasard',
   },
   {
+    id: 'ratEmpaille',
+    name: 'Rat empaillé',
+    rarity: 'peuCommune',
+    price: 5,
+    description: 'En fin d’échéance, 1 pièce pour 2 relances non utilisées',
+    onEcheanceEnd: (_, end) => Math.floor(end.rerolls / 2),
+  },
+  {
+    id: 'lettreDeChange',
+    name: 'Lettre de change',
+    rarity: 'peuCommune',
+    price: 6,
+    description: '+2 mult définitif chaque fois qu’une échéance est réglée avant sa dernière main',
+    initialState: () => ({ mult: 0 }),
+    onHand: (_, s) => (s.mult > 0 ? { mult: s.mult } : null),
+    onEcheanceEnd: (s, end) => {
+      if (end.hands > 0) s.mult += 2;
+      return 0;
+    },
+    status: (s) => t('status.mult', { n: s.mult }),
+  },
+  {
     id: 'couteauABeurre',
     name: 'Couteau à beurre',
     rarity: 'peuCommune',
@@ -248,6 +296,30 @@ export const RELICS: RelicDef[] = [
     rarity: 'rare',
     price: 8,
     description: 'La valise propose aussi un article maudit, moins cher',
+  },
+  {
+    id: 'chandelleNoire',
+    name: 'Chandelle noire',
+    rarity: 'rare',
+    price: 9,
+    description: 'La dernière main de l’échéance compte ×3 mult',
+    onHand: ({ handsLeftAfter }) => (handsLeftAfter === 0 ? { xmult: 3 } : null),
+  },
+  {
+    id: 'marteauDeJuge',
+    name: 'Marteau de juge',
+    rarity: 'rare',
+    price: 8,
+    description: 'Brelan et Carré : ×2 mult',
+    onHand: ({ result }) => (result.combo.id === 'brelan' || result.combo.id === 'carre' ? { xmult: 2 } : null),
+  },
+  {
+    id: 'mainDeGloire',
+    name: 'Main de gloire',
+    rarity: 'rare',
+    price: 10,
+    description: '×1,5 mult par relique maudite sur le rebord',
+    onHand: ({ cursed }) => (cursed > 0 ? { xmult: 1.5 ** cursed } : null),
   },
   {
     id: 'cinqCouronnes',
@@ -294,6 +366,14 @@ export const RELICS: RelicDef[] = [
     price: 8,
     description: '×(1 + 0,5 par pacte signé) mult',
     onHand: ({ body }) => (body.pacts > 0 ? { xmult: 1 + 0.5 * body.pacts } : null),
+  },
+  {
+    id: 'dentDeLait',
+    name: 'Dent de lait',
+    rarity: 'maudite',
+    price: 6,
+    description: '×2 mult ; chaque main jouée te coûte 1 pièce',
+    onHand: () => ({ xmult: 2, coins: -1 }),
   },
   {
     id: 'sourireCousu',

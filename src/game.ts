@@ -17,13 +17,13 @@ import { Printer } from './printer';
 import { CoinShower } from './coinShower';
 import { VialRack } from './vialRack';
 import { VIALS } from './rules/vials';
-import { Progress } from './progress';
+import { Progress, type Unlock } from './progress';
 import { PactScene } from './pact';
 import { Particles } from './render/particles';
 import { ps1ify } from './render/ps1';
 import { buildRelicMesh, RelicShelf } from './relicShelf';
 import type { BodyPartId } from './rules/body';
-import { CLOCKMAKER_SECONDS } from './rules/bosses';
+import { CLOCKMAKER_SECONDS, USURY } from './rules/bosses';
 import { COMBOS, evaluateBest, type BestResult, type ComboId } from './rules/combos';
 import { DIE_TYPES, faceOf, newDie, type Face } from './rules/dice';
 import type { Effect } from './rules/relics';
@@ -40,6 +40,11 @@ import { CUP_INNER_RADIUS, CUP_WALL } from './config';
 
 /** Vitesse du gobelet au lâcher au-delà de laquelle un lancer compte comme violent. */
 const VIOLENT_THROW = 25;
+
+/** Ce qu'un défi débloque, en clair. */
+function unlockReward(u: Unlock) {
+  return u.kind === 'relic' ? relicName(findRelic(u.id)) : t(`cup.${u.id}.name`);
+}
 
 /** Poids d'une combinaison pour la mise en scène (0 = rien, 1 = le Cinq). */
 const COMBO_WEIGHT: Partial<Record<ComboId, number>> = {
@@ -68,7 +73,7 @@ const INTRO_CUP_TO = new THREE.Vector3(4.6, 0, -4.2);
 
 type Phase = 'menu' | 'intro' | 'play' | 'scoring' | 'payout' | 'pact' | 'shop' | 'over';
 
-const SCORE_NOTES = [0, 3, 5, 7, 10, 12, 15, 17, 19, 22, 24];
+const SCORE_NOTES = [0, 3, 5, 7, 10, 12, 15, 17, 19, 22, 24, 27, 29, 31, 34, 36];
 const SCORE_BASE_HZ = 262;
 const PAYOUT_DURATION = 1.6;
 // Le créancier s'impatiente si le joueur ne fait rien pendant ce délai (secondes).
@@ -101,6 +106,8 @@ interface Sequence {
   nextAt: number;
   totalAt: number;
   endAt: number;
+  fastForward: boolean;
+  overkillTriggered: boolean;
 }
 
 /** La run : échéances, scoring animé, boss, pactes, boutique, fin de partie. */
@@ -116,6 +123,8 @@ export class Game {
   private introStage = 0;
   private pactSkippable = false;
   private nextBeat = 0;
+  /** Le Fossoyeur : le dé enterré sous la table pour cette main (-1 = aucun). */
+  private buried = -1;
   /** Ralenti : jusqu'à quand (en temps réel) et à quelle vitesse. */
   private slowUntil = 0;
   private slowScale = 1;
@@ -143,6 +152,8 @@ export class Game {
   private nextCoinGlint = 0;
   private readonly cigSmoke: Particles;
   private readonly cigTip = new THREE.Vector3(-6.0, 1.12, -9.3);
+  private cigGlow!: THREE.PointLight;
+  private cigEmber!: THREE.Mesh<THREE.SphereGeometry, THREE.MeshBasicMaterial>;
   private nextPuff = 0;
   private readonly hands: PlayerHands;
   private readonly printer: Printer;
@@ -153,6 +164,8 @@ export class Game {
   /** Encre de seiche débouchée : le prochain dé cliqué sera retourné. */
   private inking = -1;
   private hoveredVial = -1;
+  private lastHoveredRelic = -1;
+  private lastHoveredDie = -1;
   /** Pièces gagnées mais encore en vol : la pile ne les montre qu'une fois rangées. */
   private coinsPending = 0;
   /** Mains jouées dans l'échéance, imprimées à la suite sur le ticket. */
@@ -207,11 +220,11 @@ export class Game {
   ) {
     // Fumée de feutre : grosse, floue, lente, qui monte à peine.
     this.smoke = new Particles(stage.scene, { max: 320, life: [1.1, 2.0], size: [0.45, 2.4], alpha: 0.14, gravity: 0.3, drag: 2, softness: 1 });
-    // Copeaux de bois (et éclats de verre) : petits, nets, qui retombent.
     // La cigarette du créancier : une fumée lente qui monte dans le faisceau et s'y enroule.
     this.cigSmoke = new Particles(stage.scene, { max: 160, life: [3.5, 5.5], size: [0.25, 3.2], alpha: 0.1, gravity: 0.55, drag: 0.6, softness: 1 });
     this.buildAshtray(stage.scene);
-    this.chips = new Particles(stage.scene, { max: 360, life: [0.7, 1.4], size: [0.16, 0.1], alpha: 0.95, gravity: -16, drag: 0.8, softness: 0.25 });
+    // Copeaux de bois (et éclats de verre / étincelles d'or) : petits, nets, qui retombent.
+    this.chips = new Particles(stage.scene, { max: 420, life: [0.7, 1.4], size: [0.16, 0.1], alpha: 0.95, gravity: -16, drag: 0.8, softness: 0.25 });
     this.glints = new Glints(stage.scene);
     this.table = new DiceTable(
       stage,
@@ -300,17 +313,36 @@ export class Game {
       if (this.menu.open) return;
       if (e.code === 'Escape' && this.targeting !== null) {
         this.cancelTarget();
+      } else if (e.code === 'Escape' && this.inking >= 0) {
+        this.inking = -1;
+        this.showFlash(t('flash.inkCancel'));
       } else if (e.code === 'Escape') {
         if (this.phase === 'over') this.openMenu();
         else this.menu.pause(() => this.menu.hide(), () => this.quitRun());
       } else if (e.code === 'Space') {
         e.preventDefault();
-        this.validate();
+        if (this.phase === 'scoring' && this.sequence) {
+          this.sequence.fastForward = true;
+        } else {
+          this.validate();
+        }
       } else if (e.code === 'Tab') {
         e.preventDefault();
         if (!e.repeat) this.holdTicket(true);
       } else if (e.code === 'KeyR' && !e.ctrlKey && !e.metaKey && this.phase === 'over') {
         this.startRun(this.lastOptions.daily ? { ...this.lastOptions } : { cup: this.lastOptions.cup, stake: this.lastOptions.stake });
+      } else if (e.code === 'KeyF' && this.phase === 'shop' && this.targeting === null) {
+        // Raccourci clavier en boutique : F pour sonner la clochette de reroll.
+        if (!this.run.rerollShop()) this.sfx.tone(140, 0.2, 0.2, 'square');
+        else {
+          this.suitcase.ring();
+          this.fillSuitcase(true);
+          this.panel.bar(this.run, this.earnings);
+        }
+      } else if ((e.code === 'KeyQ' || e.code === 'KeyW' || e.code === 'KeyE') && this.phase === 'play') {
+        // Raccourcis fioles 1, 2, 3 (Q/W/E physiques, soit A/Z/E en AZERTY)
+        const vIdx = e.code === 'KeyQ' ? 0 : e.code === 'KeyW' ? 1 : 2;
+        if (this.run.vials[vIdx]) this.useVial(vIdx);
       } else if (/^Digit[1-6]$/.test(e.code)) {
         // Les chiffres suivent les dés en jeu, dans l'ordre.
         const active = this.run.activeDice();
@@ -322,6 +354,11 @@ export class Game {
     canvas.addEventListener('pointerdown', (e) => {
       this.lastTap = { x: e.clientX, y: e.clientY, touch: e.pointerType === 'touch' };
       if (e.button === 2) return this.holdTicket(true);
+      // En plein décompte du score, un clic accélère la cadence.
+      if (this.phase === 'scoring' && this.sequence) {
+        this.sequence.fastForward = true;
+        return;
+      }
       // Au toucher, une relique du rebord se lit d'un appui (hors boutique, où elle ouvre son menu).
       if (this.lastTap.touch && this.phase !== 'shop') {
         const relic = this.run.relics[this.shelf.pick(this.table.raycaster)];
@@ -369,6 +406,9 @@ export class Game {
     canvas.addEventListener('pointermove', (e) => {
       if (this.table.holding) return this.hud.hideTooltip();
       const vial = this.phase === 'play' || this.phase === 'shop' ? this.vialRack.pick(this.table.raycaster) : -1;
+      if (vial >= 0 && vial !== this.hoveredVial) {
+        this.sfx.tone(680 + vial * 90, 0.03, 0.05, 'sine');
+      }
       this.hoveredVial = vial;
       if (vial >= 0) {
         const id = this.run.vials[vial];
@@ -397,6 +437,11 @@ export class Game {
       const i = this.shelf.pick(this.table.raycaster);
       const relic = this.run.relics[i];
       if (relic) {
+        if (i !== this.lastHoveredRelic) {
+          this.lastHoveredRelic = i;
+          this.shelf.pulse(i, this.clock);
+          this.sfx.tone(420 + i * 35, 0.04, 0.06, 'triangle');
+        }
         const status = relic.def.status ? `<br><b>${relic.def.status(relic.state)}</b>` : '';
         return this.hud.showTooltip(
           `<b>${relicName(relic.def)}</b> · ${rarityName(relic.def.rarity)}<br>${relicDesc(relic.def)}${status}`,
@@ -404,16 +449,29 @@ export class Game {
           e.clientY,
         );
       }
+      this.lastHoveredRelic = -1;
+
       const hit = this.table.raycaster.intersectObjects(this.dice.filter((d) => d.active).map((d) => d.mesh), false)[0];
       const die = hit ? this.dice.findIndex((d) => d.mesh === hit.object) : -1;
       const owned = this.run.dice[die];
-      if (!owned) return this.hud.hideTooltip();
+      if (!owned) {
+        this.lastHoveredDie = -1;
+        return this.hud.hideTooltip();
+      }
+      if (die !== this.lastHoveredDie) {
+        this.lastHoveredDie = die;
+        this.glints.spawn(this.dice[die].mesh.position.clone().add(new THREE.Vector3(0, 0.35, 0)), 0.45, 0.3);
+        this.sfx.tone(310 + die * 25, 0.025, 0.04, 'triangle');
+      }
       const type = DIE_TYPES[owned.type];
       const mods = owned.mods.map((m, f) => (m ? `<br>${t('shop.face', { v: type.faces[f], mod: modName(m) })}` : '')).join('');
+      const fragile = owned.type === 'verre' || owned.mods.includes('crane');
+      const wearInfo = fragile && owned.wear > 0 ? `<br><i style="color:#c84030">Usure : ${owned.wear}/${WEAR_LIMIT}</i>` : '';
+      const crackedInfo = this.cracked.has(die) ? `<br><b style="color:#5fa8e8">+1 (Fêlé)</b>` : '';
       const pending = this.targeting !== null ? this.run.shop[this.targeting] : null;
       const action = pending ? `<br><b>${pending.kind === 'die' ? t('shop.clickReplace') : t('shop.clickEngrave')}</b>` : '';
-      canvas.style.cursor = pending ? 'pointer' : 'default';
-      this.hud.showTooltip(`<b>${dieName(owned.type)}</b><br>${dieDesc(owned.type)}${mods}${action}`, e.clientX, e.clientY);
+      canvas.style.cursor = pending || this.inking >= 0 ? 'pointer' : 'default';
+      this.hud.showTooltip(`<b>${dieName(owned.type)}</b><br>${dieDesc(owned.type)}${mods}${wearInfo}${crackedInfo}${action}`, e.clientX, e.clientY);
     });
   }
 
@@ -443,7 +501,7 @@ export class Game {
       return { ...f, value: Math.min(f.value + 1, Math.max(...DIE_TYPES[this.run.dice[die].type].faces)) };
     });
     // Face jumelle : elle prend la valeur du dé posé le plus près d'elle.
-    return faces.map((f) => {
+    const twinned = faces.map((f) => {
       if (f.mod !== 'jumelle') return f;
       const here = this.dice[f.die].mesh.position;
       let best: Face | null = null;
@@ -458,6 +516,16 @@ export class Game {
       }
       return best ? { ...f, value: best.value } : f;
     });
+    // La Pleureuse : les 6 pleurent et ne valent plus que 1.
+    const wept = this.run.bossIs('pleureuse') ? twinned.map((f) => (f.value === 6 ? { ...f, value: 1 } : f)) : twinned;
+    // Le Fossoyeur enterre le dé le plus faible : il ne compte pas.
+    this.buried = -1;
+    if (this.run.bossIs('fossoyeur') && wept.length > 1) {
+      const low = wept.reduce((a, b) => (b.value < a.value ? b : a));
+      this.buried = low.die;
+      return wept.filter((f) => f !== low);
+    }
+    return wept;
   }
 
   private evaluate(faces: Face[]) {
@@ -507,6 +575,12 @@ export class Game {
       } else {
         this.run.rerolls--;
       }
+      // L'Usurier : la dette enfle à chaque relance.
+      if (this.run.bossIs('usurier')) {
+        this.run.bleed *= USURY;
+        this.floats.spawn('+5 %', MULT_COLOR, new THREE.Vector3(0, 3.2, -8.4), this.clock);
+        this.sfx.tone(180, 0.2, 0.15, 'square');
+      }
       // La Mère se fait payer chaque relance.
       if (this.run.bossIs('mere')) {
         this.run.coins -= MOTHER_TOLL;
@@ -533,17 +607,36 @@ export class Game {
       if (victim) {
         this.cracked.add(victim.die);
         this.showFlash(t('flash.cracked'));
-        this.floats.spawn('+1', CHIPS_COLOR, this.dice[victim.die].mesh.position.clone().add(new THREE.Vector3(0, 1, 0)), this.clock);
+        const pos = this.dice[victim.die].mesh.position.clone();
+        this.floats.spawn('+1', CHIPS_COLOR, pos.clone().add(new THREE.Vector3(0, 1, 0)), this.clock);
+        this.glints.spawn(pos.add(new THREE.Vector3(0, 0.4, 0)), 1.1, 0.6);
+        this.sfx.burst({ type: 'highpass', freq: 2800, duration: 0.14, volume: 0.5 });
       }
     }
     const faces = this.faces();
+    // Le Fossoyeur jette une pelletée de terre sur le dé qu'il enterre.
+    if (this.buried >= 0) {
+      const at = this.dice[this.buried].mesh.position;
+      for (let i = 0; i < 10; i++) {
+        this.chips.emit({
+          position: at.clone().add(new THREE.Vector3(0, 0.8, 0)),
+          velocity: new THREE.Vector3((Math.random() - 0.5) * 2, -1 - Math.random() * 2, (Math.random() - 0.5) * 2),
+          color: new THREE.Color(0.24, 0.15, 0.08),
+          scale: 0.7,
+        });
+      }
+      this.showFlash(t('flash.buried'));
+    }
     // Face œil : elle te regarde, et t'accorde une relance de plus pour la main.
     for (const f of faces) {
       if (f.mod !== 'oeil' || this.eyesOpened.has(f.die)) continue;
       this.eyesOpened.add(f.die);
       this.run.rerolls++;
       this.showFlash(t('flash.eye'));
-      this.floats.spawn('+1', CHIPS_COLOR, this.dice[f.die].mesh.position.clone().add(new THREE.Vector3(0, 1, 0)), this.clock);
+      const pos = this.dice[f.die].mesh.position.clone();
+      this.floats.spawn('+1', CHIPS_COLOR, pos.clone().add(new THREE.Vector3(0, 1, 0)), this.clock);
+      this.glints.spawn(pos.add(new THREE.Vector3(0, 0.45, 0)), 1.2, 0.7);
+      this.sfx.tone(660, 0.14, 0.2, 'sine');
     }
     // Tutoriel : le créancier tapote les dés qui méritent d'être gardés.
     if (this.run.tutorial && this.rollsThisHand === 1 && this.run.handsPlayed === 0 && this.run.echeance === 0) {
@@ -564,7 +657,12 @@ export class Game {
       });
     }
     // Une face clou cloue son dé dans le tapis jusqu'à la fin de la main.
-    for (const f of faces) if (f.mod === 'clou') this.table.forceKeep(f.die);
+    for (const f of faces) {
+      if (f.mod === 'clou') {
+        this.table.forceKeep(f.die);
+        this.sfx.toneAt(0.05, 180, 90, 0.08, 0.25, 'square');
+      }
+    }
 
     this.previousResult = result;
     this.result = result;
@@ -626,82 +724,149 @@ export class Game {
     });
     this.phase = 'scoring';
     this.result = result;
+    document.getElementById('tally')?.classList.remove('overkill');
     this.hud.showTally(result.level > 1 ? `${comboName(result.combo.id)} ${t('hud.level', { n: result.level })}` : comboName(result.combo.id));
     this.hud.setTally(breakdown.steps[0].chips, breakdown.steps[0].mult);
     this.sfx.play('wood', 0.8);
-    this.sequence = { breakdown, faces, next: 1, nextAt: this.clock + 0.4, totalAt: -1, endAt: -1 };
+    this.sequence = {
+      breakdown,
+      faces,
+      next: 1,
+      nextAt: this.clock + 0.36,
+      totalAt: -1,
+      endAt: -1,
+      fastForward: false,
+      overkillTriggered: false,
+    };
   }
 
   private stepScoring() {
     const seq = this.sequence;
     if (!seq) return;
     const steps = seq.breakdown.steps;
+    const speedMult = seq.fastForward ? 0.35 : 1;
+
     while (seq.next < steps.length && this.clock >= seq.nextAt) {
-      this.playStep(steps[seq.next], seq.next, seq.faces);
+      const currentStep = steps[seq.next];
+      this.playStep(currentStep, seq.next, seq.faces);
+
+      // Détection en direct du dépassement de la dette ("Overkill" façon Balatro)
+      const runningScore = currentStep.chips * currentStep.mult;
+      if (!seq.overkillTriggered && this.run.score + runningScore >= this.run.target) {
+        seq.overkillTriggered = true;
+        document.getElementById('tally')?.classList.add('overkill');
+        this.stage.flare.value = Math.max(this.stage.flare.value, 0.75);
+        this.fx.kick(-2.5);
+        this.sfx.toneAt(0, 110, 220, 0.25, 0.25, 'sawtooth');
+      }
+
       seq.next++;
-      // Le rythme accélère quand les déclenchements s'enchaînent.
-      seq.nextAt += Math.max(0.12, 0.3 - seq.next * 0.015);
+      // Accélération exponentielle façon Balatro plus la chaîne s'allonge
+      const baseDelay = Math.max(0.065, 0.31 * Math.pow(0.89, seq.next));
+      const xmultPause = currentStep.effect.xmult ? 0.06 : 0;
+      seq.nextAt += (baseDelay + xmultPause) * speedMult;
     }
-    if (seq.next >= steps.length && seq.totalAt < 0) seq.totalAt = Math.max(this.clock, seq.nextAt) + 0.15;
+    if (seq.next >= steps.length && seq.totalAt < 0) {
+      seq.totalAt = Math.max(this.clock, seq.nextAt) + 0.14 * speedMult;
+    }
     if (seq.totalAt > 0 && seq.endAt < 0 && this.clock >= seq.totalAt) {
       this.hud.setTallyTotal(seq.breakdown.total, (k) => this.sfx.tone(SCORE_BASE_HZ * (1.5 + k * 1.5), 0.03, 0.08, 'square'));
       this.sfx.tone(SCORE_BASE_HZ * 2, 0.5, 0.25, 'square');
       this.sfx.tone(SCORE_BASE_HZ * 3, 0.5, 0.15);
+
+      const remainingDebt = Math.max(1, this.run.target - this.run.score);
       // Cette main règle la dette : le temps se fige un instant, un coup sourd, l'ampoule s'emballe.
       if (this.run.score + seq.breakdown.total >= this.run.target) {
-        this.slowmo(0.75, 0.22);
-        this.sfx.toneAt(0.05, 70, 38, 0.6, 0.6);
-        this.sfx.burst({ type: 'lowpass', freq: 300, duration: 0.5, volume: 0.8 });
-        this.stage.flare.value = 1;
-        this.fx.jolt(0.8);
-        this.fx.aberration(0.006);
+        const isMassiveOverkill = seq.breakdown.total >= this.run.target * 1.5;
+        this.slowmo(isMassiveOverkill ? 0.95 : 0.75, 0.2);
+        this.sfx.toneAt(0.05, 70, 34, 0.65, 0.65);
+        this.sfx.burst({ type: 'lowpass', freq: 320, duration: 0.55, volume: 0.85 });
+        this.stage.flare.value = isMassiveOverkill ? 1.35 : 1;
+        this.fx.jolt(isMassiveOverkill ? 1.1 : 0.8);
+        this.fx.kick(isMassiveOverkill ? -6 : -3.5);
+        this.fx.aberration(isMassiveOverkill ? 0.01 : 0.006);
+        if (isMassiveOverkill && !this.run.has('sourireCousu')) this.creditor.wince();
       }
       // Une main qui pèse : l'ampoule s'emballe, l'or jaillit des dés qui ont marqué.
-      const weight = Math.min(1, seq.breakdown.total / Math.max(1, this.run.target - this.run.score));
+      const weight = Math.min(1.2, seq.breakdown.total / remainingDebt);
       if (weight > 0.35) {
         this.stage.flare.value = Math.max(this.stage.flare.value, weight);
         this.fx.jolt(0.25 + weight * 0.4);
         this.fx.aberration(0.003 * weight);
         for (const k of seq.breakdown.steps.filter((st) => st.kind === 'die').map((st) => st.die!)) {
           const at = this.dice[seq.faces[k].die].mesh.position;
-          for (let i = 0; i < 6 + Math.round(weight * 10); i++) {
+          this.glints.spawn(at.clone().add(new THREE.Vector3(0, 0.45, 0)), 1.2, 0.65);
+          for (let i = 0; i < 6 + Math.round(weight * 12); i++) {
             this.chips.emit({
               position: at.clone().add(new THREE.Vector3(0, 0.5, 0)),
-              velocity: new THREE.Vector3((Math.random() - 0.5) * 5, 3 + Math.random() * 5, (Math.random() - 0.5) * 5),
-              color: new THREE.Color(1, 0.75 + Math.random() * 0.2, 0.25),
-              scale: 0.4 + Math.random() * 0.5,
+              velocity: new THREE.Vector3((Math.random() - 0.5) * 5.5, 3.2 + Math.random() * 5.5, (Math.random() - 0.5) * 5.5),
+              color: new THREE.Color(1, 0.75 + Math.random() * 0.22, 0.25),
+              scale: 0.45 + Math.random() * 0.55,
             });
           }
         }
       }
-      seq.endAt = this.clock + 1.0;
+      seq.endAt = this.clock + (seq.fastForward ? 0.55 : 1.0);
     }
     if (seq.endAt > 0 && this.clock >= seq.endAt) this.finishScoring(seq);
   }
 
   private playStep(step: ScoreStep, index: number, faces: Face[]) {
     this.hud.setTally(step.chips, step.mult);
-    if (step.effect.coins) this.run.coins += step.effect.coins;
-    const note = SCORE_BASE_HZ * 2 ** (SCORE_NOTES[Math.min(index, SCORE_NOTES.length - 1)] / 12);
+    if (step.effect.coins) this.run.coins = Math.max(0, this.run.coins + step.effect.coins);
+    // Progression harmonique continue : monte d'octave si la chaîne dépasse SCORE_NOTES
+    const octaveShift = Math.floor(index / SCORE_NOTES.length) * 12;
+    const semitone = SCORE_NOTES[index % SCORE_NOTES.length] + octaveShift;
+    const note = SCORE_BASE_HZ * 2 ** (Math.min(38, semitone) / 12);
     const die = step.die !== undefined ? this.dice[faces[step.die].die] : null;
+    const isXMult = step.effect.xmult !== undefined;
+
+    // Punch physique à chaque déclenchement
+    if (isXMult) {
+      this.fx.kick(-2.2);
+      this.fx.jolt(0.28);
+      this.fx.aberration(0.0045);
+      this.slowmo(0.11, 0.45);
+    } else {
+      this.fx.jolt(0.07 + Math.min(0.14, index * 0.01));
+    }
+
     if (step.kind === 'die' && die) {
       die.flash();
-      this.floats.spawn(`+${step.effect.chips}`, CHIPS_COLOR, die.mesh.position, this.clock);
+      const pos = die.mesh.position;
+      this.floats.spawn(`+${step.effect.chips}`, CHIPS_COLOR, pos, this.clock);
+      this.glints.spawn(pos.clone().add(new THREE.Vector3(0, 0.4, 0)), 0.75, 0.35);
       this.sfx.tone(note, 0.12, 0.22);
     } else if (step.kind === 'face' && die) {
       const [text, color] = effectLabel(step.effect);
-      this.floats.spawn(text, color, die.mesh.position.clone().add(new THREE.Vector3(0, 0.6, 0)), this.clock);
-      this.sfx.tone(note * 1.5, 0.1, 0.22, 'square');
+      const pos = die.mesh.position.clone().add(new THREE.Vector3(0, 0.6, 0));
+      this.floats.spawn(text, color, pos, this.clock, isXMult ? 1.2 : 1.0);
+      this.glints.spawn(pos, isXMult ? 1.2 : 0.85, 0.45);
+      this.sfx.tone(note * 1.5, 0.1, 0.24, 'square');
     } else if (step.kind === 'relic' && step.relic !== undefined) {
       this.shelf.pulse(step.relic, this.clock);
+      const relicPos = this.shelf.position(step.relic);
       const [text, color] = effectLabel(step.effect);
-      this.floats.spawn(text, color, this.shelf.position(step.relic), this.clock, step.effect.xmult ? 1.2 : 0.9);
-      if (step.effect.xmult) this.sfx.tone(note / 2, 0.3, 0.3, 'sawtooth');
-      else this.sfx.tone(note, 0.12, 0.25, 'square');
+      this.floats.spawn(text, color, relicPos, this.clock, isXMult ? 1.3 : 0.95);
+      if (isXMult) {
+        this.glints.spawn(relicPos.clone().add(new THREE.Vector3(0, 0.3, 0)), 1.3, 0.6);
+        for (let i = 0; i < 8; i++) {
+          this.chips.emit({
+            position: relicPos.clone().add(new THREE.Vector3(0, 0.25, 0)),
+            velocity: new THREE.Vector3((Math.random() - 0.5) * 4, 2 + Math.random() * 3.5, (Math.random() - 0.5) * 4),
+            color: new THREE.Color(1, 0.82, 0.32),
+            scale: 0.45,
+          });
+        }
+        this.sfx.tone(note / 2, 0.3, 0.32, 'sawtooth');
+        this.sfx.tone(note * 1.25, 0.16, 0.2, 'square');
+      } else {
+        this.sfx.tone(note, 0.12, 0.25, 'square');
+      }
     } else {
       // Malédiction ou règle du boss : le texte vient de l'ardoise.
       const [text, color] = effectLabel(step.effect);
-      this.floats.spawn(step.label ? `${t(`step.${step.label}`)} ${text}` : text, color, new THREE.Vector3(0, 2.5, -7.6), this.clock, 1.1);
+      this.floats.spawn(step.label ? `${t(`step.${step.label}`)} ${text}` : text, color, new THREE.Vector3(0, 2.5, -7.6), this.clock, 1.15);
       this.sfx.tone(note / 2, 0.4, 0.3, 'sawtooth');
     }
   }
@@ -709,6 +874,7 @@ export class Game {
   private finishScoring(seq: Sequence) {
     const { breakdown, faces } = seq;
     this.sequence = null;
+    document.getElementById('tally')?.classList.remove('overkill');
     this.lastAction = this.clock;
     const result = this.result!;
     // Une main qui paie toute l'échéance d'un coup : le poing du créancier se referme.
@@ -729,6 +895,7 @@ export class Game {
       this.progress.record({ type: 'hand', five, fiveOfOnes: five && faces.every((f) => f.value === 1) });
     }
     this.run.played.push(result.combo.id);
+    if (result.combo.id === 'carre' && !this.run.tutorial) this.progress.record({ type: 'carre' });
     for (const r of this.run.relics) r.def.afterHand?.(r.state);
     // Les 0 des dés maudits maudissent la main suivante.
     const zeros = faces.filter((f) => f.type === 'maudit' && f.value === 0).length;
@@ -765,12 +932,15 @@ export class Game {
     const name = dieName(this.run.dice[die].type);
     const at = this.dice[die].mesh.position.clone();
     this.run.dice[die] = newDie('os');
-    for (let i = 0; i < 14; i++) {
+    this.fx.jolt(0.45);
+    this.fx.aberration(0.005);
+    this.glints.spawn(at.clone().add(new THREE.Vector3(0, 0.3, 0)), 1.4, 0.5);
+    for (let i = 0; i < 18; i++) {
       this.chips.emit({
         position: at.clone(),
-        velocity: new THREE.Vector3((Math.random() - 0.5) * 6, 2 + Math.random() * 4, (Math.random() - 0.5) * 6),
-        color: new THREE.Color(0.75, 0.9, 0.9),
-        scale: 0.5 + Math.random() * 0.6,
+        velocity: new THREE.Vector3((Math.random() - 0.5) * 6.5, 2.2 + Math.random() * 4.5, (Math.random() - 0.5) * 6.5),
+        color: new THREE.Color(0.75, 0.92, 0.95),
+        scale: 0.5 + Math.random() * 0.65,
       });
     }
     this.sfx.burst({ type: 'highpass', freq: 3500, duration: 0.3, volume: 0.8 });
@@ -783,11 +953,13 @@ export class Game {
 
   private startPayout() {
     this.phase = 'payout';
+    document.body.classList.remove('last-roll');
     this.earnings = this.run.earnings();
     this.run.coins += this.earnings.total;
     this.payoutUntil = this.clock + PAYOUT_DURATION;
     if (this.run.tutorial && this.run.echeance === 0) this.creditor.showSmile(true);
     if (this.run.isBoss && !this.run.tutorial) this.progress.record({ type: 'boss' });
+    if (this.run.hands === 0 && !this.run.tutorial) this.progress.record({ type: 'clutch' });
     if (this.run.isFinal) {
       this.phase = 'over';
       this.progress.endRun(this.run.cup, this.run.stake, true);
@@ -837,6 +1009,7 @@ export class Game {
 
   private openShop() {
     this.phase = 'shop';
+    document.body.classList.remove('last-roll');
     this.ambience.setShop(true);
     this.run.openShop();
     for (const item of this.run.shop) if (item?.kind === 'relic') this.progress.discover(item.def.id);
@@ -861,6 +1034,7 @@ export class Game {
 
   /** Échéance ratée : le créancier glisse son contrat. Au boss final, pas de pacte. */
   private fail() {
+    document.body.classList.remove('last-roll');
     const boss = this.run.boss;
     if (!this.run.canPact) {
       // Pas de second pacte la même nuit, ni face au créancier lui-même.
@@ -929,11 +1103,13 @@ export class Game {
     this.consumeVial(index);
     if (id === 'sang') {
       this.run.rerolls += 2;
+      this.fx.pulse(0.45);
       this.showFlash(t('flash.vialBlood'));
     } else if (id === 'laudanum') {
       this.laudanum = true;
       this.showFlash(t('flash.vialLaudanum'));
-      this.fx.aberration(0.01);
+      this.fx.aberration(0.012);
+      this.fx.kick(-3);
     }
   }
 
@@ -953,12 +1129,12 @@ export class Game {
     const current = this.table.faces().find((f) => f.die === die);
     if (!current) return;
     this.table.flip(die, 5 - current.face);
-    for (let i = 0; i < 12; i++) {
+    for (let i = 0; i < 14; i++) {
       this.smoke.emit({
         position: this.dice[die].mesh.position.clone(),
-        velocity: new THREE.Vector3((Math.random() - 0.5) * 1.5, 0.6 + Math.random(), (Math.random() - 0.5) * 1.5),
+        velocity: new THREE.Vector3((Math.random() - 0.5) * 1.6, 0.6 + Math.random(), (Math.random() - 0.5) * 1.6),
         color: new THREE.Color(0.05, 0.06, 0.1),
-        scale: 0.6,
+        scale: 0.65,
       });
     }
     this.showFlash(t('flash.vialInk'));
@@ -985,12 +1161,12 @@ export class Game {
     paper.rotation.z = Math.PI / 2 - 0.15;
     paper.rotation.y = 0.5;
     paper.position.set(-6.25, 1.06, -9.37);
-    const ember = new THREE.Mesh(new THREE.SphereGeometry(0.06, 6, 4), new THREE.MeshBasicMaterial({ color: 0xff5a10 }));
-    ember.position.copy(this.cigTip).add(new THREE.Vector3(0, -0.06, 0));
-    const glow = new THREE.PointLight(0xff5010, 1.2, 1.6, 2);
-    glow.position.copy(this.cigTip);
+    this.cigEmber = new THREE.Mesh(new THREE.SphereGeometry(0.06, 6, 4), new THREE.MeshBasicMaterial({ color: 0xff5a10 }));
+    this.cigEmber.position.copy(this.cigTip).add(new THREE.Vector3(0, -0.06, 0));
+    this.cigGlow = new THREE.PointLight(0xff5010, 1.2, 1.6, 2);
+    this.cigGlow.position.copy(this.cigTip);
     for (const m of [tray, ash, paper]) m.castShadow = m.receiveShadow = true;
-    scene.add(tray, ash, paper, ember, glow);
+    scene.add(tray, ash, paper, this.cigEmber, this.cigGlow);
   }
 
   /** Une combinaison qui tombe : la caméra encaisse selon son rang, les grosses font vaciller l'ampoule. */
@@ -998,11 +1174,12 @@ export class Game {
     const weight = COMBO_WEIGHT[id] ?? 0;
     if (weight <= 0) return;
     this.fx.jolt(weight * 0.55);
-    this.fx.kick(-weight * 3);
-    this.fx.aberration(weight * 0.004);
+    this.fx.kick(-weight * 3.2);
+    this.fx.aberration(weight * 0.0045);
     if (weight >= 0.6) {
-      this.stage.flare.value = Math.max(this.stage.flare.value, weight * 0.8);
-      this.sfx.toneAt(0, 90, 50, 0.5, 0.3 * weight);
+      this.stage.flare.value = Math.max(this.stage.flare.value, weight * 0.85);
+      this.sfx.toneAt(0, 90, 50, 0.5, 0.32 * weight);
+      this.slowmo(0.18, 0.4);
     }
   }
 
@@ -1039,6 +1216,9 @@ export class Game {
       pacts: r.body.pacts,
       lost: bodySummary(r),
       relics: r.relics.map((x) => relicName(x.def)).join(', '),
+      short: !won && r.score < r.target ? fmt(r.target - r.score) : null,
+      records: r.tutorial ? [] : this.progress.recordBests({ paid: this.runPaid, hand: this.bestHand?.score ?? 0, reach: r.night * 3 + r.echeance }).map((k) => t(`record.${k}`)),
+      next: this.progress.nextUnlocks(3).map(({ unlock, cur, max }) => ({ reward: unlockReward(unlock), hint: t(unlock.hint), cur, max })),
     };
     this.menu.summary(s, () => this.startRun(this.lastOptions.daily ? { ...this.lastOptions } : { cup: this.lastOptions.cup, stake: this.lastOptions.stake }), () => this.openMenu());
   }
@@ -1068,6 +1248,7 @@ export class Game {
 
   private gameOver() {
     this.phase = 'over';
+    document.body.classList.remove('last-roll');
     this.progress.endRun(this.run.cup, this.run.stake, false);
     const { night, echeance, score, target } = this.run;
     const where = echeance === 2 ? t('where.boss', { n: night }) : t('where.echeance', { n: night, e: echeance + 1 });
@@ -1134,13 +1315,23 @@ export class Game {
     }
   }
 
-  /** Le poing du créancier touche la table : tout tremble, l'image se déchire. */
+  /** Le poing du créancier touche la table : tout tremble, l'image se déchire et la cendre saute du cendrier. */
   private onSlam() {
     this.sfx.knock();
     this.fx.jolt(1);
     this.fx.tear(0.9);
     this.fx.aberration(0.008);
     this.table.hop();
+    // La secousse fait voler les cendres et quelques braises hors du cendrier
+    for (let i = 0; i < 12; i++) {
+      const isEmber = i < 3;
+      this.chips.emit({
+        position: this.cigTip.clone().add(new THREE.Vector3((Math.random() - 0.5) * 0.4, 0, (Math.random() - 0.5) * 0.4)),
+        velocity: new THREE.Vector3((Math.random() - 0.5) * 2.8, 1.2 + Math.random() * 2.5, (Math.random() - 0.5) * 2.8),
+        color: isEmber ? new THREE.Color(1, 0.38, 0.08) : new THREE.Color(0.42, 0.4, 0.38),
+        scale: isEmber ? 0.35 : 0.45,
+      });
+    }
   }
 
   // ---------------------------------------------------------------- boutique
@@ -1264,8 +1455,11 @@ export class Game {
     else if (item.kind === 'gravure') to = new THREE.Vector3(0, 1.8, -8.2);
     else to = this.dice[die].mesh.position.clone();
     this.suitcase.flyAway(index, to, () => {
-      if (item.kind === 'relic') this.shelf.sync(this.run.relics);
-      else if (item.kind === 'fiole') this.vialRack.sync(this.run.vials);
+      this.glints.spawn(to.clone().add(new THREE.Vector3(0, 0.3, 0)), 1.0, 0.5);
+      if (item.kind === 'relic') {
+        this.shelf.sync(this.run.relics);
+        this.progress.record({ type: 'cursed', count: this.run.relics.filter((r) => r.def.rarity === 'maudite').length });
+      } else if (item.kind === 'fiole') this.vialRack.sync(this.run.vials);
       else if (item.kind === 'gravure') this.showFlash(t('flash.levelUp', { name: comboName(item.combo), n: this.run.levels[item.combo] ?? 1 }));
       else {
         this.syncDice(false);
@@ -1357,7 +1551,7 @@ export class Game {
     this.runHands = 0;
     this.bestHand = null;
     this.cup.mesh.visible = true;
-    document.body.classList.remove('in-intro');
+    document.body.classList.remove('in-intro', 'last-roll');
     this.run = new RunState({ ...o, unlocked: this.progress.unlockedRelics() });
     this.coinsRecorded = false;
     this.sequence = null;
@@ -1541,7 +1735,7 @@ export class Game {
   private openMenu() {
     this.phase = 'menu';
     this.timers = [];
-    document.body.classList.remove('in-intro');
+    document.body.classList.remove('in-intro', 'last-roll');
     this.hud.hideBanner();
     this.hud.hideTally();
     this.panel.hide();
@@ -1589,16 +1783,20 @@ export class Game {
     }
     if (this.phase === 'intro') this.stepIntro();
     if (this.table.holding) this.fx.jolt(Math.min(0.07, this.table.holdSpeed * 0.0028));
+
     // Dernière main et la dette n'est pas payée : un cœur qui cogne, les bords de l'image qui rougissent.
-    if (this.phase === 'play' && this.run.hands === 1 && this.run.score < this.run.target && !this.run.tutorial) {
-      if (this.clock >= this.nextBeat) {
-        const behind = 1 - this.run.score / this.run.target;
-        this.nextBeat = this.clock + 1.05 - behind * 0.3;
-        this.sfx.toneAt(0, 62, 38, 0.13, 0.55);
-        this.sfx.toneAt(0.2, 58, 36, 0.11, 0.4);
-        this.fx.pulse(0.35 + behind * 0.45);
-      }
+    const isCriticalHand = this.phase === 'play' && this.run.hands === 1 && this.run.score < this.run.target && !this.run.tutorial;
+    document.body.classList.toggle('last-roll', isCriticalHand);
+    if (isCriticalHand && this.clock >= this.nextBeat) {
+      const behind = 1 - this.run.score / this.run.target;
+      this.nextBeat = this.clock + 1.05 - behind * 0.3;
+      this.sfx.toneAt(0, 62, 38, 0.13, 0.55);
+      this.sfx.toneAt(0.2, 58, 36, 0.11, 0.4);
+      this.fx.pulse(0.35 + behind * 0.45);
+      this.fx.kick(-0.9 * (0.5 + behind));
+      this.fx.aberration(0.0025 * behind);
     }
+
     while (this.timers.length > 0 && this.clock >= this.timers[0].at) this.timers.shift()!.fn();
     this.table.step(dt);
     this.pact.update(dt);
@@ -1625,7 +1823,8 @@ export class Game {
     // Impatience : le joueur hésite, les doigts du créancier tapotent de plus en plus vite.
     const waiting = this.phase === 'play' && this.table.idle && !this.creditor.busy;
     const idle = this.clock - this.lastAction;
-    this.creditor.setImpatience(waiting ? Math.min(1, Math.max(0, (idle - PATIENCE) / IMPATIENCE_RAMP)) : 0);
+    const impatienceLevel = waiting ? Math.min(1, Math.max(0, (idle - PATIENCE) / IMPATIENCE_RAMP)) : 0;
+    this.creditor.setImpatience(impatienceLevel);
     this.creditor.update(dt, this.clock, this.stage.camera);
     this.bossProps.update(this.clock);
     this.suitcase.update(dt, this.clock);
@@ -1646,13 +1845,20 @@ export class Game {
     const cupHome = this.phase !== 'intro' && this.cup.position.z > 4;
     this.hands.update(dt, this.clock, cupHome ? { position: this.cup.position, quaternion: this.cup.quaternion } : null, this.table.holding);
     this.smoke.update(dt);
+
+    // Braise dynamique : rougeoie plus fort selon l'impatience du créancier et la pression
+    const currentPressure = this.pressure();
+    const emberPulse = 1.0 + Math.sin(this.clock * (4 + impatienceLevel * 6)) * 0.25 + impatienceLevel * 0.6 + currentPressure * 0.35;
+    this.cigGlow.intensity = 1.1 * emberPulse;
+    this.cigEmber.material.color.setRGB(1.0, Math.min(1, 0.32 + emberPulse * 0.14), 0.06);
+
     // Volutes : une bouffée de temps en temps, qui dérive avec l'air de la cave.
     if (this.clock >= this.nextPuff) {
-      this.nextPuff = this.clock + 0.12 + Math.random() * 0.12;
+      this.nextPuff = this.clock + Math.max(0.06, (0.12 + Math.random() * 0.12) * (1 - impatienceLevel * 0.4));
       const drift = Math.sin(this.clock * 0.4) * 0.25;
       this.cigSmoke.emit({
         position: this.cigTip.clone(),
-        velocity: new THREE.Vector3(drift + (Math.random() - 0.5) * 0.12, 0.45 + Math.random() * 0.2, 0.08 + (Math.random() - 0.5) * 0.1),
+        velocity: new THREE.Vector3(drift + (Math.random() - 0.5) * 0.12, 0.45 + Math.random() * 0.2 + impatienceLevel * 0.25, 0.08 + (Math.random() - 0.5) * 0.1),
         color: new THREE.Color(0.78, 0.74, 0.68),
       });
     }
@@ -1666,7 +1872,7 @@ export class Game {
     }
     this.chips.update(dt);
     this.ambience.update(dt);
-    this.fx.pressure(this.pressure());
+    this.fx.pressure(currentPressure);
   }
 
   /** Pression de l'échéance : mains consommées sans que la dette ne baisse. */

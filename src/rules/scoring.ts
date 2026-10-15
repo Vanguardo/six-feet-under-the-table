@@ -115,6 +115,7 @@ export function scoreHand(faces: Face[], result: ComboResult, relics: OwnedRelic
     isFirstHand: o.isFirstHand,
     handsLeftAfter: o.handsLeftAfter,
     relicCount: relics.length,
+    cursed: relics.filter((x) => x.def.rarity === 'maudite').length,
     body: o.body,
     previousCombo: o.previousCombo,
   };

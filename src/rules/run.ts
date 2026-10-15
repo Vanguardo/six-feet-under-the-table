@@ -255,7 +255,7 @@ export class RunState {
     const echeance = ECHEANCE_REWARD[this.echeance];
     const hands = this.rules.has('hands') ? 0 : this.hands;
     const interest = Math.min(this.rules.has('interest') ? 2 : INTEREST_CAP, Math.floor(this.coins / INTEREST_STEP));
-    const relics = this.relics.reduce((sum, r) => sum + (r.def.onEcheanceEnd?.(r.state) ?? 0), 0);
+    const relics = this.relics.reduce((sum, r) => sum + (r.def.onEcheanceEnd?.(r.state, { hands: this.hands, rerolls: this.rerolls }) ?? 0), 0);
     return { echeance, hands, interest, relics, total: echeance + hands + interest + relics };
   }
 

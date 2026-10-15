@@ -27,6 +27,12 @@ export interface Stats {
   fives: number;
   /** Parties du corps prises, toutes runs confondues (le registre du créancier). */
   taken: Record<BodyPartId, number>;
+  /** Records personnels : total payé en une run, meilleure main, plus loin atteint (nuit × 3 + échéance). */
+  bestPaid?: number;
+  bestHand?: number;
+  bestReach?: number;
+  /** Échéances réglées sur leur toute dernière main. */
+  clutches?: number;
 }
 
 interface SaveData {
@@ -40,13 +46,15 @@ interface SaveData {
   seen: string[];
   /** Table du jour : la date jouée et le plus loin atteint ce jour-là. */
   daily?: { date: string; best: string; tries: number };
+  /** Jours d'affilée passés à la table du jour. */
+  streak?: { last: string; count: number };
 }
 
 /** Reliques disponibles dès le départ ; les autres se gagnent. */
 const STARTING_RELICS = [
   'dentEnOr', 'mainCoupee', 'chapelet', 'megot', 'ticketFroisse', 'ampouleNue', 'allumette',
   'cleRouillee', 'craie', 'pieceTrouee', 'montreArretee', 'photoDeFamille', 'sablier', 'chienDeFaience',
-  'seringue', 'gobeletFele',
+  'seringue', 'gobeletFele', 'deACoudre', 'trefleSeche', 'ferACheval', 'ratEmpaille', 'lettreDeChange',
 ];
 
 /** Conditions de déblocage des reliques et des gobelets (vérifiées après chaque événement). */
@@ -56,24 +64,30 @@ export interface Unlock {
   /** Clé de texte décrivant la condition. */
   hint: string;
   done: (p: Progress) => boolean;
+  /** Où en est le joueur : [actuel, objectif]. Par défaut, 0 ou 1 selon `done`. */
+  progress?: (p: Progress) => [number, number];
 }
 
 export const UNLOCKS: Unlock[] = [
-  { kind: 'relic', id: 'leContrat', hint: 'unlock.night4', done: (p) => p.stats.bestNight >= 4 },
-  { kind: 'relic', id: 'miroirSansTain', hint: 'unlock.night5', done: (p) => p.stats.bestNight >= 5 },
-  { kind: 'relic', id: 'cinqCouronnes', hint: 'unlock.five', done: (p) => p.stats.fives >= 1 },
-  { kind: 'relic', id: 'bocalVide', hint: 'unlock.pacts3', done: (p) => p.stats.pacts >= 3 },
-  { kind: 'relic', id: 'moignon', hint: 'unlock.fingers4', done: (p) => p.stats.taken.doigt >= 4 },
+  { kind: 'relic', id: 'leContrat', hint: 'unlock.night4', done: (p) => p.stats.bestNight >= 4, progress: (p) => [p.stats.bestNight, 4] },
+  { kind: 'relic', id: 'miroirSansTain', hint: 'unlock.night5', done: (p) => p.stats.bestNight >= 5, progress: (p) => [p.stats.bestNight, 5] },
+  { kind: 'relic', id: 'cinqCouronnes', hint: 'unlock.five', done: (p) => p.stats.fives >= 1, progress: (p) => [p.stats.fives, 1] },
+  { kind: 'relic', id: 'bocalVide', hint: 'unlock.pacts3', done: (p) => p.stats.pacts >= 3, progress: (p) => [p.stats.pacts, 3] },
+  { kind: 'relic', id: 'moignon', hint: 'unlock.fingers4', done: (p) => p.stats.taken.doigt >= 4, progress: (p) => [p.stats.taken.doigt, 4] },
   { kind: 'relic', id: 'oeilDeVerre', hint: 'unlock.eye', done: (p) => p.stats.taken.oeil >= 1 },
-  { kind: 'relic', id: 'couteauABeurre', hint: 'unlock.sell5', done: (p) => p.stats.relicsSold >= 5 },
+  { kind: 'relic', id: 'couteauABeurre', hint: 'unlock.sell5', done: (p) => p.stats.relicsSold >= 5, progress: (p) => [p.stats.relicsSold, 5] },
   { kind: 'relic', id: 'rosaireDos', hint: 'unlock.boneNight', done: (p) => p.flags.has('boneNight') },
   { kind: 'relic', id: 'langueDeSerpent', hint: 'unlock.tongue', done: (p) => p.stats.taken.langue >= 1 },
   { kind: 'relic', id: 'sixiemeDoigt', hint: 'unlock.hand', done: (p) => p.stats.taken.main >= 1 },
   { kind: 'relic', id: 'coeurDansUnBocal', hint: 'unlock.heart', done: (p) => p.stats.taken.coeur >= 1 },
   { kind: 'relic', id: 'pacteEnBlanc', hint: 'unlock.pacts2run', done: (p) => p.flags.has('twoPacts') },
-  { kind: 'relic', id: 'doigtDuCreancier', hint: 'unlock.fingers8', done: (p) => p.stats.taken.doigt >= 8 },
-  { kind: 'relic', id: 'sourireCousu', hint: 'unlock.bosses5', done: (p) => p.stats.bossesBeaten >= 5 },
-  { kind: 'cup', id: 'boucher', hint: 'unlock.fingers10', done: (p) => p.stats.taken.doigt >= 10 },
+  { kind: 'relic', id: 'doigtDuCreancier', hint: 'unlock.fingers8', done: (p) => p.stats.taken.doigt >= 8, progress: (p) => [p.stats.taken.doigt, 8] },
+  { kind: 'relic', id: 'sourireCousu', hint: 'unlock.bosses5', done: (p) => p.stats.bossesBeaten >= 5, progress: (p) => [p.stats.bossesBeaten, 5] },
+  { kind: 'relic', id: 'chandelleNoire', hint: 'unlock.clutch3', done: (p) => (p.stats.clutches ?? 0) >= 3, progress: (p) => [p.stats.clutches ?? 0, 3] },
+  { kind: 'relic', id: 'marteauDeJuge', hint: 'unlock.carre', done: (p) => p.flags.has('carre') },
+  { kind: 'relic', id: 'mainDeGloire', hint: 'unlock.cursed2', done: (p) => p.flags.has('cursed2') },
+  { kind: 'relic', id: 'dentDeLait', hint: 'unlock.teeth3', done: (p) => p.stats.taken.dent >= 3, progress: (p) => [p.stats.taken.dent, 3] },
+  { kind: 'cup', id: 'boucher', hint: 'unlock.fingers10', done: (p) => p.stats.taken.doigt >= 10, progress: (p) => [p.stats.taken.doigt, 10] },
   { kind: 'cup', id: 'os', hint: 'unlock.onesFive', done: (p) => p.flags.has('onesFive') },
   { kind: 'cup', id: 'dore', hint: 'unlock.coins40', done: (p) => p.flags.has('coins40') },
   { kind: 'cup', id: 'perce', hint: 'unlock.night5', done: (p) => p.stats.bestNight >= 5 },
@@ -114,6 +128,7 @@ export class Progress {
           stats: { ...d.stats, ...loaded.stats, taken: { ...emptyTaken(), ...loaded.stats?.taken } },
         };
         for (const f of loaded.flags ?? []) this.flags.add(f);
+        for (const id of STARTING_RELICS) if (!this.data.relics.includes(id)) this.data.relics.push(id);
       }
     } catch {
       // Pas de stockage : on joue sans sauvegarde.
@@ -206,7 +221,7 @@ export class Progress {
 
   // ---------------------------------------------------------------- événements de jeu
 
-  record(event: { type: 'hand'; five: boolean; fiveOfOnes: boolean } | { type: 'pact'; part: BodyPartId; inRun: number } | { type: 'night'; reached: number; boneOnly: boolean } | { type: 'boss' } | { type: 'sold' } | { type: 'coins'; amount: number }) {
+  record(event: { type: 'clutch' } | { type: 'carre' } | { type: 'cursed'; count: number } | { type: 'hand'; five: boolean; fiveOfOnes: boolean } | { type: 'pact'; part: BodyPartId; inRun: number } | { type: 'night'; reached: number; boneOnly: boolean } | { type: 'boss' } | { type: 'sold' } | { type: 'coins'; amount: number }) {
     const s = this.data.stats;
     switch (event.type) {
       case 'hand':
@@ -231,6 +246,15 @@ export class Progress {
         break;
       case 'coins':
         if (event.amount >= 40) this.flags.add('coins40');
+        break;
+      case 'clutch':
+        s.clutches = (s.clutches ?? 0) + 1;
+        break;
+      case 'carre':
+        this.flags.add('carre');
+        break;
+      case 'cursed':
+        if (event.count >= 2) this.flags.add('cursed2');
         break;
     }
     this.check();
@@ -269,10 +293,67 @@ export class Progress {
     const today = Progress.today();
     const d = this.data.daily?.date === today ? this.data.daily : { date: today, best: '', tries: 0 };
     d.tries++;
+    // La série : un jour de plus si on était là hier, sinon elle repart à un.
+    const st = this.data.streak;
+    if (!st || st.last !== today) {
+      this.data.streak = { last: today, count: st && st.last === Progress.yesterday() ? st.count + 1 : 1 };
+    }
     const bestRank = Number(d.best.split('|')[0] || -1);
     if (rank > bestRank) d.best = `${rank}|${label}`;
     this.data.daily = d;
     this.save();
+  }
+
+  /** Fin de run : les records battus (« paid », « hand », « reach »), enregistrés au passage. */
+  recordBests(run: { paid: number; hand: number; reach: number }) {
+    const s = this.data.stats;
+    const broken: ('paid' | 'hand' | 'reach')[] = [];
+    if (run.paid > (s.bestPaid ?? 0)) {
+      if (s.bestPaid) broken.push('paid');
+      s.bestPaid = run.paid;
+    }
+    if (run.hand > (s.bestHand ?? 0)) {
+      if (s.bestHand) broken.push('hand');
+      s.bestHand = run.hand;
+    }
+    if (run.reach > (s.bestReach ?? 0)) {
+      if (s.bestReach) broken.push('reach');
+      s.bestReach = run.reach;
+    }
+    this.save();
+    return broken;
+  }
+
+  /** Les défis encore ouverts, du plus avancé au moins avancé. */
+  nextUnlocks(n: number) {
+    return UNLOCKS.filter((u) => !(u.kind === 'relic' ? this.relicUnlocked(u.id) : this.cupUnlocked(u.id as CupId)))
+      .map((u) => {
+        const [cur, max] = u.progress?.(this) ?? [u.done(this) ? 1 : 0, 1];
+        return { unlock: u, cur: Math.min(cur, max), max };
+      })
+      .sort((a, b) => b.cur / b.max - a.cur / a.max)
+      .slice(0, n);
+  }
+
+  /** Tous les défis, faits ou non, avec leur avancement. */
+  challenges() {
+    return UNLOCKS.map((u) => {
+      const done = u.kind === 'relic' ? this.relicUnlocked(u.id) : this.cupUnlocked(u.id as CupId);
+      const [cur, max] = u.progress?.(this) ?? [done ? 1 : 0, 1];
+      return { unlock: u, done, cur: done ? max : Math.min(cur, max), max };
+    });
+  }
+
+  /** Jours d'affilée à la table du jour (0 si la série est rompue). */
+  get streak() {
+    const s = this.data.streak;
+    if (!s) return 0;
+    return s.last === Progress.today() || s.last === Progress.yesterday() ? s.count : 0;
+  }
+
+  static yesterday() {
+    const d = new Date(Date.now() - 86400000);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
   }
 
   /** Remise à zéro complète (réglages conservés). */

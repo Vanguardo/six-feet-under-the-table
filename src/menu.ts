@@ -3,7 +3,14 @@ import { relicDesc, relicName, rarityName } from './i18n/names';
 import { cupCatalog, relicCatalog, type Progress } from './progress';
 import type { BodyPartId } from './rules/body';
 import { MAX_STAKE, type CupId } from './rules/cups';
-import { RELICS } from './rules/relics';
+import { findRelic, RELICS } from './rules/relics';
+
+/** Une ligne de défi : la récompense, la condition, une barre qui se remplit. */
+function bar(reward: string, hint: string, cur: number, max: number, done = false) {
+  const pct = Math.round((Math.min(cur, max) / max) * 100);
+  return `<div class="challenge ${done ? 'done' : ''}"><div class="top"><span>${reward}</span><small>${done ? '✓' : `${Math.min(cur, max)} / ${max}`}</small></div>
+    <div class="hint">${hint}</div><div class="track"><div class="fill" style="width:${pct}%"></div></div></div>`;
+}
 
 export interface RunSummary {
   won: boolean;
@@ -15,6 +22,12 @@ export interface RunSummary {
   pacts: number;
   lost: string;
   relics: string;
+  /** Ce qui manquait pour payer (si perdu). */
+  short: string | null;
+  /** Records battus pendant cette run. */
+  records: string[];
+  /** Les défis les plus proches. */
+  next: { reward: string; hint: string; cur: number; max: number }[];
 }
 
 export interface MenuActions {
@@ -114,6 +127,7 @@ export class Menu {
        <div class="buttons">
          <button class="primary" data-action="play">${t('menu.play')}</button>
          ${this.progress.tutorialDone ? `<button data-action="daily">${t('menu.daily')}${this.dailyBest()}</button>` : ''}
+         <button data-action="challenges">${t('menu.challenges')}</button>
          <button data-action="collection">${t('menu.collection')}</button>
          <button data-action="registry">${t('menu.registry')}</button>
          <button data-action="settings">${t('menu.settings')}</button>
@@ -123,6 +137,7 @@ export class Menu {
         play: () => (this.progress.tutorialDone ? this.cups() : this.actions.tutorial()),
         daily: () => this.actions.daily(),
         collection: () => this.collection(),
+        challenges: () => this.challenges(),
         registry: () => this.registry(),
         settings: () => this.settings(() => this.title()),
       },
@@ -132,7 +147,8 @@ export class Menu {
   private dailyBest() {
     const d = this.progress.daily;
     if (!d || !d.best) return '';
-    return ` <small>· ${t('menu.dailyBest', { best: d.best.split('|')[1] })}</small>`;
+    const streak = this.progress.streak;
+    return ` <small>· ${t('menu.dailyBest', { best: d.best.split('|')[1] })}${streak > 1 ? ` · ${t('menu.streak', { n: streak })}` : ''}</small>`;
   }
 
   /** Choix du gobelet de départ et du niveau d'intérêts. */
@@ -182,6 +198,22 @@ export class Menu {
     );
   }
 
+  /** Les défis : ce qui reste à arracher au créancier, et où tu en es. */
+  private challenges() {
+    const all = this.progress.challenges();
+    const done = all.filter((c) => c.done).length;
+    const rows = all
+      .sort((a, b) => Number(a.done) - Number(b.done) || b.cur / b.max - a.cur / a.max)
+      .map((c) => bar(c.unlock.kind === 'relic' ? relicName(findRelic(c.unlock.id)) : t(`cup.${c.unlock.id}.name`), t(c.unlock.hint), c.cur, c.max, c.done))
+      .join('');
+    this.show(
+      `<h2>${t('menu.challenges')} · ${done}/${all.length}</h2>
+       <div class="challenges">${rows}</div>
+       <div class="row"><button data-action="back">${t('menu.back')}</button></div>`,
+      { back: () => this.title() },
+    );
+  }
+
   /** L'étagère : chaque relique découverte dans son bocal étiqueté. */
   private collection() {
     const catalog = relicCatalog(this.progress);
@@ -216,6 +248,9 @@ export class Menu {
            <div class="line"><span>${t('stats.hands')}</span><b>${s.hands}</b></div>
            <div class="line"><span>${t('stats.bosses')}</span><b>${s.bossesBeaten}</b></div>
            <div class="line"><span>${t('stats.pacts')}</span><b>${s.pacts}</b></div>
+           <div class="line"><span>${t('stats.bestPaid')}</span><b>${(s.bestPaid ?? 0).toLocaleString()}</b></div>
+           <div class="line"><span>${t('stats.bestHand')}</span><b>${(s.bestHand ?? 0).toLocaleString()}</b></div>
+           <div class="line"><span>${t('stats.clutches')}</span><b>${s.clutches ?? 0}</b></div>
          </div>
        </div>
        <div class="row"><button data-action="back">${t('menu.back')}</button></div>`,
@@ -270,6 +305,8 @@ export class Menu {
       `<div class="summary">
          <h2>${s.won ? t('summary.won') : t('summary.lost')}</h2>
          <div class="cause">${s.cause}</div>
+         ${s.short ? `<div class="short">${t('summary.short', { n: s.short })}</div>` : ''}
+         ${s.records.length ? `<div class="stamps">${s.records.map((r) => `<span class="stamp">${r}</span>`).join('')}</div>` : ''}
          ${line(t('summary.reached'), s.reached)}
          ${line(t('summary.paid'), s.paid)}
          ${line(t('summary.best'), s.best)}
@@ -277,6 +314,7 @@ export class Menu {
          ${line(t('summary.pacts'), String(s.pacts))}
          ${line(t('summary.lostParts'), s.lost || '—')}
          <div class="relics-list">${t('summary.relics')} ${s.relics || '—'}</div>
+         ${s.next.length ? `<div class="next"><b>${t('summary.next')}</b>${s.next.map((n) => bar(n.reward, n.hint, n.cur, n.max)).join('')}</div>` : ''}
        </div>
        <div class="row">
          <button class="primary" data-action="again">${t('summary.again')}</button>

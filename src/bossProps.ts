@@ -62,6 +62,29 @@ function build(id: BossId): THREE.Object3D | null {
       add(new THREE.CylinderGeometry(0.32, 0.32, 0.7, 10, 1, true), new THREE.MeshStandardMaterial({ color: 0xb8c8b0, transparent: true, opacity: 0.25, depthWrite: false }), [0, 0.35, 0]);
       for (let i = 0; i < 5; i++) add(new THREE.CapsuleGeometry(0.05, 0.16, 2, 5), mat(0x101408, { roughness: 0.2 }), [Math.cos(i * 1.3) * 0.15, 0.15 + i * 0.09, Math.sin(i * 1.3) * 0.15], [i, i * 2, 0]);
       break;
+    case 'fossoyeur':
+      // Pelle couchée, la lame encore pleine de terre.
+      add(new THREE.CylinderGeometry(0.04, 0.04, 1.3, 5), wood, [0, 0.06, 0], [0, 0, Math.PI / 2]);
+      add(new THREE.BoxGeometry(0.42, 0.04, 0.5), mat(0x6a6a6a, { metalness: 0.6, roughness: 0.6 }), [0.85, 0.05, 0]);
+      add(new THREE.SphereGeometry(0.16, 5, 4), mat(0x3a2414, { roughness: 1 }), [0.85, 0.12, 0.05]);
+      add(new THREE.BoxGeometry(0.24, 0.06, 0.08), wood, [-0.72, 0.06, 0]);
+      break;
+    case 'usurier':
+      // Balance de cuivre : un fléau, deux plateaux, l'un plus bas.
+      add(new THREE.CylinderGeometry(0.04, 0.06, 0.9, 6), gold, [0, 0.45, 0]);
+      add(new THREE.BoxGeometry(1.1, 0.04, 0.04), gold, [0, 0.9, 0], [0, 0, 0.12]);
+      add(new THREE.CylinderGeometry(0.22, 0.2, 0.04, 10), gold, [-0.52, 0.55, 0]);
+      add(new THREE.CylinderGeometry(0.22, 0.2, 0.04, 10), gold, [0.52, 0.42, 0]);
+      add(new THREE.CylinderGeometry(0.18, 0.18, 0.05, 8), gold, [0.52, 0.47, 0]);
+      add(new THREE.CylinderGeometry(0.2, 0.24, 0.06, 8), wood, [0, 0.03, 0]);
+      break;
+    case 'pleureuse':
+      // Mouchoir de dentelle froissé, taché, avec une larme qui perle.
+      add(new THREE.BoxGeometry(0.62, 0.05, 0.55), mat(0xd8d0c0, { roughness: 1 }), [0, 0.03, 0], [0.05, 0.4, 0.06]);
+      add(new THREE.SphereGeometry(0.16, 6, 4), mat(0xd8d0c0, { roughness: 1 }), [0.12, 0.1, -0.05]);
+      add(new THREE.SphereGeometry(0.05, 6, 5), mat(0xa8c8d8, { roughness: 0.05, metalness: 0.3 }), [-0.18, 0.08, 0.12]);
+      add(new THREE.BoxGeometry(0.2, 0.051, 0.14), mat(0x5a0a0a), [-0.1, 0.035, -0.12], [0, 0.4, 0]);
+      break;
     case 'creancier':
       return null;
   }

@@ -1,6 +1,6 @@
 import type { BodyPartId } from './body';
 
-export type BossId = 'aveugle' | 'comptable' | 'mere' | 'boucher' | 'horloger' | 'jumeau' | 'pretre' | 'sangsue' | 'creancier';
+export type BossId = 'aveugle' | 'comptable' | 'mere' | 'boucher' | 'horloger' | 'jumeau' | 'pretre' | 'sangsue' | 'fossoyeur' | 'usurier' | 'pleureuse' | 'creancier';
 
 export interface Boss {
   id: BossId;
@@ -21,6 +21,9 @@ export const BOSSES: Record<BossId, Boss> = {
   jumeau: { id: 'jumeau', name: 'Le Jumeau', object: 'un miroir', rule: 'Une combinaison déjà jouée dans l’échéance ne rapporte que la moitié.', pact: 'oreille' },
   pretre: { id: 'pretre', name: 'Le Prêtre', object: 'un crucifix inversé', rule: 'À chaque main, une relique de plus s’éteint, de gauche à droite.', pact: 'langue' },
   sangsue: { id: 'sangsue', name: 'La Sangsue', object: 'un bocal de sangsues', rule: 'Les faces dorées coûtent 3 pièces au lieu d’en rapporter.', pact: null },
+  fossoyeur: { id: 'fossoyeur', name: 'Le Fossoyeur', object: 'une pelle couverte de terre', rule: 'Ton dé le plus faible est enterré : il ne compte jamais.', pact: 'main' },
+  usurier: { id: 'usurier', name: "L'Usurier", object: 'une balance de cuivre', rule: 'Chaque relance fait grimper la dette de 5 %.', pact: null },
+  pleureuse: { id: 'pleureuse', name: 'La Pleureuse', object: 'un mouchoir trempé de larmes', rule: 'Les 6 pleurent : ils ne valent que 1.', pact: 'oeil' },
   creancier: {
     id: 'creancier',
     name: 'Le Créancier',
@@ -31,6 +34,9 @@ export const BOSSES: Record<BossId, Boss> = {
 };
 
 /** Boss tirés au hasard pour les nuits 1 à 6 ; la nuit 7 est toujours le créancier. */
-export const BOSS_POOL: BossId[] = ['aveugle', 'comptable', 'mere', 'boucher', 'horloger', 'jumeau', 'pretre', 'sangsue'];
+export const BOSS_POOL: BossId[] = ['aveugle', 'comptable', 'mere', 'boucher', 'horloger', 'jumeau', 'pretre', 'sangsue', 'fossoyeur', 'usurier', 'pleureuse'];
+
+/** L'Usurier : chaque relance fait monter la dette de l'échéance. */
+export const USURY = 1.05;
 
 export const CLOCKMAKER_SECONDS = 8;
