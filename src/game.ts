@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import RAPIER from '@dimforge/rapier3d-compat';
 import { Ambience } from './ambience';
-import { BossProps } from './bossProps';
+import { BOSS_PROP_AT, BossProps } from './bossProps';
 import { Creditor } from './creditor/creditor';
 import { Cup } from './cup';
 import { Die } from './dice';
@@ -584,7 +584,7 @@ export class Game {
       // La Mère se fait payer chaque relance.
       if (this.run.bossIs('mere')) {
         this.run.coins -= MOTHER_TOLL;
-        this.floats.spawn(`-${MOTHER_TOLL} $`, COIN_COLOR, new THREE.Vector3(-1.6, 1.5, -7.9), this.clock);
+        this.floats.spawn(`-${MOTHER_TOLL} $`, COIN_COLOR, BOSS_PROP_AT.clone().add(new THREE.Vector3(0, 0.7, 0)), this.clock);
       }
     }
     // Les dés relancés perdent le +1 du Gobelet fêlé.
@@ -1701,8 +1701,8 @@ export class Game {
   /** Le boss entre : gros plan sur l'objet qu'il a posé, son nom en lettres de sang, un bourdon. */
   private bossReveal() {
     const boss = this.run.boss!;
-    const at = new THREE.Vector3(-1.6, 1.5, -7.95);
-    this.fx.lean(at, new THREE.Vector3(-1.4, 3.4, -3.9), 2);
+    const at = BOSS_PROP_AT.clone().add(new THREE.Vector3(0, 0.5, 0));
+    this.fx.lean(at, at.clone().add(new THREE.Vector3(1.2, 2.6, 4.2)), 2);
     this.hud.showCard(bossName(boss), bossRule(boss), 'boss');
     this.sfx.toneAt(0.1, 55, 52, 2.4, 0.5, 'sawtooth');
     this.sfx.toneAt(0.1, 82, 80, 2.2, 0.25, 'sawtooth');

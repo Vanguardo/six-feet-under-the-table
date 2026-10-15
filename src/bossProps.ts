@@ -92,7 +92,10 @@ function build(id: BossId): THREE.Object3D | null {
   return g;
 }
 
-/** L'objet du boss en cours, posé devant l'ardoise. */
+/** Où le créancier pose l'objet du boss : sur le feutre, devant le rail du fond, à gauche de l'ardoise, dans la lumière. */
+export const BOSS_PROP_AT = new THREE.Vector3(-4.7, 0.02, -5.9);
+
+/** L'objet du boss en cours, posé sur le rail du fond. */
 export class BossProps {
   private current: THREE.Object3D | null = null;
   private shownId: BossId | null = null;
@@ -106,7 +109,11 @@ export class BossProps {
     this.shownId = id;
     this.current = id ? build(id) : null;
     if (this.current) {
-      this.current.position.set(-1.6, 0.8, -7.95);
+      // Posé sur le feutre, à gauche : loin de l'ardoise et des mains du créancier.
+      this.current.position.copy(BOSS_PROP_AT);
+      this.current.rotation.y = 0.35;
+      // Un peu plus grand : il doit se lire de ta place, de l'autre côté du feutre.
+      this.current.scale.setScalar(1.5);
       this.scene.add(this.current);
       this.appearAt = clock;
     }
@@ -116,6 +123,6 @@ export class BossProps {
     if (!this.current) return;
     // L'objet tombe sur la planche, comme posé un peu brusquement.
     const t = Math.min(1, (clock - this.appearAt) / 0.35);
-    this.current.position.y = 0.8 + (1 - t * t) * 2;
+    this.current.position.y = BOSS_PROP_AT.y + (1 - t * t) * 2;
   }
 }
