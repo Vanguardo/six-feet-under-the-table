@@ -163,6 +163,19 @@ export class Hand {
     return joints;
   }
 
+  /** Base du doigt `f` (0 = index … 3 = auriculaire, 4 = pouce), dans le monde. */
+  fingerBase(f: number) {
+    this.root.updateMatrixWorld(true);
+    return this.joints[f][0].getWorldPosition(new THREE.Vector3());
+  }
+
+  /** Bout du doigt `f`, dans le monde. */
+  fingerTip(f: number) {
+    this.root.updateMatrixWorld(true);
+    const last = this.joints[f][this.joints[f].length - 1];
+    return last.localToWorld(new THREE.Vector3(0, 0, 0.25));
+  }
+
   /** Doigts coupés (0 = index … 3 = auriculaire) : le doigt disparaît, un moignon bandé reste. */
   setMissing(fingers: number[]) {
     for (let f = 0; f < 4; f++) {

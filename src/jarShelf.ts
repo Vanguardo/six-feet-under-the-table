@@ -171,7 +171,8 @@ export class JarShelf {
 
 // ---------------------------------------------------------------- morceaux
 
-function buildPiece(part: BodyPartId): THREE.Object3D {
+/** Le morceau pris, modélisé : sert aux bocaux et aux scènes de pacte. */
+export function buildPiece(part: BodyPartId): THREE.Object3D {
   const g = new THREE.Group();
   const add = (geo: THREE.BufferGeometry, mat: THREE.Material, pos: [number, number, number] = [0, 0, 0], rot: [number, number, number] = [0, 0, 0], parent: THREE.Object3D = g) => {
     const m = new THREE.Mesh(geo, mat);

@@ -15,6 +15,8 @@ export interface ParticleStyle {
   additive?: boolean;
   /** Bord du disque : 0 = net (éclats), 1 = très flou (fumée). */
   softness: number;
+  /** Une particule touche la table : renvoyer vrai la fait disparaître (une goutte qui s'écrase). */
+  onLand?: (x: number, z: number, scale: number, color: [number, number, number]) => boolean;
 }
 
 export interface Emit {
@@ -133,6 +135,11 @@ export class Particles {
       }
       // Les copeaux s'arrêtent sur la table au lieu de passer à travers.
       if (s.gravity < 0 && this.pos[k + 1] < 0.03) {
+        if (this.vel[k + 1] < 0 && s.onLand?.(this.pos[k], this.pos[k + 2], this.scale[i], [this.colorAttr.getX(i), this.colorAttr.getY(i), this.colorAttr.getZ(i)])) {
+          this.age[i] = this.life[i];
+          this.alphaAttr.setX(i, 0);
+          continue;
+        }
         this.pos[k + 1] = 0.03;
         this.vel[k] *= 0.5;
         this.vel[k + 1] = 0;

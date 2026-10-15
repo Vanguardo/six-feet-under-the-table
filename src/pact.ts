@@ -2,6 +2,10 @@ import * as THREE from 'three';
 import type { Creditor } from './creditor/creditor';
 import { PAPER_DEPTH } from './creditor/creditor';
 import { JarShelf } from './jarShelf';
+import { LensBlood } from './lensBlood';
+import { bloodParticles, buildCutscene, Splats, type Cutscene } from './pactCutscenes';
+import type { Particles } from './render/particles';
+import type { Body } from './rules/body';
 import { ps1ify } from './render/ps1';
 import { grimeTexture, skinTexture } from './render/textures';
 import { t } from './i18n';
@@ -13,9 +17,10 @@ import type { Sfx } from './sfx';
 export interface PactFx {
   jolt(amount: number): void;
   /** Le joueur se penche sur un point de la table, ou se rassoit (`null`). */
-  lean(point: THREE.Vector3 | null): void;
+  lean(point: THREE.Vector3 | null, from?: THREE.Vector3, speed?: number): void;
   tear(amount: number): void;
   aberration(amount: number): void;
+  eyes(lost: number): void;
 }
 
 // La feuille : 7 × 4,6 unités, dessinée à 100 px par unité.
@@ -333,11 +338,18 @@ export class PactScene {
   private clock = 0;
   /** Les bocaux, sur l'étagère à gauche. */
   readonly shelf: JarShelf;
-  private readonly stains: THREE.Mesh[] = [];
+  private readonly stains: THREE.Object3D[] = [];
   private paper: ContractPaper | null = null;
   private readonly thumb: PlayerThumb;
   /** Gore atténué (réglage) : pas de sang à l'écran ni sur la table, pas d'éclair rouge. */
   softGore = false;
+  /** La scène de coupe en cours (gore non atténué). */
+  private cutscene: { cs: Cutscene; t: number; part: BodyPartId; onDone: () => void } | null = null;
+  private readonly blood: Particles;
+  private readonly splats: Splats;
+  private readonly lens = new LensBlood();
+  /** La lampe des gros plans : toujours là, éteinte hors des scènes (pas de shader à recompiler). */
+  private readonly light = new THREE.PointLight(0xffd8b8, 0, 7, 1.4);
   /** Le contrat est posé devant le joueur et attend une signature. */
   private waiting: { onSign: (part: BodyPartId) => void; onRefuse: () => void } | null = null;
 
@@ -346,13 +358,17 @@ export class PactScene {
     private readonly sfx: Sfx,
     private readonly fx: PactFx,
     private readonly creditor: Creditor,
+    private readonly camera: THREE.Camera,
   ) {
+    this.splats = new Splats(scene);
+    scene.add(this.light);
+    this.blood = bloodParticles(scene, this.splats);
     this.thumb = new PlayerThumb(scene);
     this.shelf = new JarShelf(scene);
   }
 
   get busy() {
-    return this.timeline.length > 0;
+    return this.timeline.length > 0 || this.cutscene !== null;
   }
 
   /** Le contrat attend une signature : le jeu transmet survols et clics. */
@@ -423,8 +439,50 @@ export class PactScene {
 
   // ---------------------------------------------------------------- mise en scène
 
+  /**
+   * Le pacte exécuté, montré : chaque partie a sa scène (pactCutscenes). Avec le gore atténué,
+   * l'ancienne version : le noir, les sons, la lumière qui revient.
+   */
+  play(part: BodyPartId, onDone: () => void, body?: Body) {
+    if (this.softGore || !body) return this.playInDark(part, onDone);
+    this.removePaper();
+    const cs = buildCutscene(part, {
+      scene: this.scene,
+      camera: this.camera,
+      blood: this.blood,
+      body,
+      fx: {
+        jolt: (a) => this.fx.jolt(a),
+        tear: (a) => this.fx.tear(a),
+        aberration: (a) => this.fx.aberration(a),
+        lean: (p, from, speed) => this.fx.lean(p, from, speed),
+        splatter: (u, v, amount) => this.lens.splash(u, v, amount),
+        eyes: (n) => this.fx.eyes(n),
+      },
+      light: this.light,
+    });
+    this.cutscene = { cs, t: 0, part, onDone };
+    this.creditor.hideHands(true);
+    this.toolSounds(part, cs.cut);
+    this.at(cs.cut + 0.3, () => this.scream(part));
+  }
+
+  /** Fin de la scène : l'outil repart, le morceau rejoint son bocal, le sang reste sur le feutre. */
+  private finishCutscene() {
+    const c = this.cutscene;
+    if (!c) return;
+    this.cutscene = null;
+    c.cs.dispose();
+    this.creditor.hideHands(false);
+    // La flaque reste sur le feutre ; les gouttes aussi (Splats).
+    this.stains.push(...c.cs.keep);
+    this.addTrophy(c.part);
+    this.breathing();
+    c.onDone();
+  }
+
   /** Noir, l'outil, la coupure, le cri étouffé ; puis la lumière revient sur le sang. */
-  play(part: BodyPartId, onDone: () => void) {
+  private playInDark(part: BodyPartId, onDone: () => void) {
     const cut = part === 'coeur' ? 1.4 : 1.0;
     this.at(0, () => this.blackout.classList.add('show'));
     this.at(0.3, () => {
@@ -456,6 +514,7 @@ export class PactScene {
 
   /** Abrège la mise en scène : tout ce qui restait à jouer arrive d'un coup. */
   skip() {
+    this.finishCutscene();
     const rest = this.timeline;
     this.timeline = [];
     for (const e of rest) e.fn();
@@ -470,6 +529,14 @@ export class PactScene {
     this.clock += dt;
     this.thumb.update(dt);
     this.shelf.update(dt);
+    this.blood.update(dt);
+    this.lens.update(dt);
+    if (this.cutscene) {
+      const c = this.cutscene;
+      c.t += dt;
+      c.cs.update(c.t, dt);
+      if (c.t >= c.cs.duration) this.finishCutscene();
+    }
     while (this.timeline.length > 0 && this.clock >= this.timeline[0].at) this.timeline.shift()!.fn();
   }
 
@@ -568,8 +635,15 @@ export class PactScene {
 
   /** Nouvelle run : bocaux vidés, feutre nettoyé. */
   reset() {
+    if (this.cutscene) {
+      this.cutscene.cs.dispose();
+      this.cutscene = null;
+      this.creditor.hideHands(false);
+    }
     for (const o of this.stains) this.scene.remove(o);
     this.stains.length = 0;
+    this.splats.clear();
+    this.lens.clear();
     this.shelf.reset();
     this.timeline = [];
     this.removePaper();

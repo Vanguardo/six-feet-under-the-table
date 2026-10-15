@@ -260,7 +260,7 @@ export class Game {
       tear: () => this.sfx.burst({ type: 'bandpass', freq: 3200, freqEnd: 1600, q: 0.8, duration: 0.55, volume: 0.7 }),
     });
     this.creditor.objects.forEach(ps1ify);
-    this.pact = new PactScene(stage.scene, sfx, fx, this.creditor);
+    this.pact = new PactScene(stage.scene, sfx, fx, this.creditor, stage.camera);
     this.bossProps = new BossProps(stage.scene);
     this.suitcase = new Suitcase(stage.scene, sfx);
     this.mousePrompt = new MousePrompt(stage.scene);
@@ -1072,7 +1072,9 @@ export class Game {
     if (!this.run.tutorial) this.progress.record({ type: 'pact', part, inRun: this.run.body.pacts });
     this.sfx.toneAt(0, 196, 180, 0.6, 0.2); // le pouce sur le papier
     this.creditor.sneer(1);
-    this.pact.play(part, () => this.afterPact(part));
+    // Il rafle les dés : la table doit être nette pour ce qui va suivre.
+    this.table.collectDice();
+    this.pact.play(part, () => this.afterPact(part), this.run.body);
   }
 
   private afterPact(part: BodyPartId) {

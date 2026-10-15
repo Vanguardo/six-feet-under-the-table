@@ -682,6 +682,11 @@ export class Creditor {
     if (on) this.smile.widen(0.9, this.clock, 3);
   }
 
+  /** Les scènes de pacte jouent leurs propres mains : les siennes s'effacent le temps de la scène. */
+  hideHands(hidden: boolean) {
+    this.right.root.visible = this.left.root.visible = !hidden;
+  }
+
   /** Victoire : le sourire disparaît, les mains reculent dans le noir. */
   vanish() {
     this.smile.setVisible(false);
